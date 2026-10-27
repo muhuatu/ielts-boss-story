@@ -3,7 +3,7 @@
 /* ================= storage ================= */
 const KEY = 'ielts-boss-story-v1';
 const S = Object.assign(
-  { read: {}, best: {}, known: {}, star: {}, wrong: {}, srs: {}, steps: {}, last: null, days: {}, mode: 'learn', font: 17, theme: '' },
+  { read: {}, best: {}, known: {}, star: {}, wrong: {}, srs: {}, steps: {}, last: null, days: {}, mode: 'learn', font: 17, theme: '', accent: 'en-GB', voiceName: '', rate: 0.9 },
   load()
 );
 function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
@@ -43,7 +43,7 @@ function dueItems() {
 const learned = k => S.known[k] || (S.srs[k] && S.srs[k].lv > 0);
 
 /* ================= data ================= */
-let STORIES = [], BY_ID = {}, WORDS = [], WORD_MAP = {};
+let STORIES = [], BY_ID = {}, WORDS = [], WORD_MAP = {}, DICT = {};
 const lc = s => s.toLowerCase();
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -104,16 +104,22 @@ const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { c
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), 1600); }
 
 let voice = null;
+const enVoices = () => ('speechSynthesis' in window ? speechSynthesis.getVoices() : []).filter(v => /^en/i.test(v.lang));
+const accentVoices = () => enVoices().filter(v => v.lang.replace('_', '-').toLowerCase().startsWith(S.accent.toLowerCase()));
+// higher-quality voices first: enhanced/premium/neural/Google ones usually sound far more natural
+const voiceRank = v => (/premium|enhanced|neural|natural/i.test(v.name) ? 0 : /google/i.test(v.name) ? 1 : 2);
 function pickVoice() {
-  const vs = speechSynthesis.getVoices().filter(v => /^en/i.test(v.lang));
-  voice = vs.find(v => /en-GB/i.test(v.lang) && /Google|Daniel|Serena|Kate/i.test(v.name)) || vs.find(v => /en-GB/i.test(v.lang)) || vs.find(v => /en-US/i.test(v.lang)) || vs[0] || null;
+  const vs = enVoices();
+  voice = vs.find(v => v.name === S.voiceName) ||
+    accentVoices().sort((a, b) => voiceRank(a) - voiceRank(b))[0] || vs[0] || null;
+  if ($('#voiceSel')) fillVoiceSelect();
 }
 if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
 function speak(text) {
   if (!('speechSynthesis' in window)) return toast('此瀏覽器不支援發音');
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  u.lang = voice ? voice.lang : 'en-GB'; if (voice) u.voice = voice; u.rate = .9;
+  u.lang = voice ? voice.lang : S.accent; if (voice) u.voice = voice; u.rate = S.rate;
   speechSynthesis.speak(u);
 }
 
@@ -129,6 +135,14 @@ function setTab(tab) {
 }
 
 /* ================= word sheet ================= */
+const wordLink = x => WORD_MAP[lc(x)] ? `<button class="tag link" data-open="${esc(x)}">${esc(x)}</button>` : `<span class="tag">${esc(x)}</span>`;
+function dictHtml(k) {
+  const d = DICT[k]; if (!d) return '';
+  return `<div class="sec">例句</div>
+    <div class="ex"><div class="ex-en"><span>${esc(d.ex)}</span><button class="speak sm" data-say="${esc(d.ex)}" aria-label="朗讀例句">${I.speak}</button></div><div class="ex-zh">${esc(d.exZh)}</div></div>
+    ${d.syn.length ? `<div class="sr"><span class="sec">同義</span><div class="tags">${d.syn.map(wordLink).join('')}</div></div>` : ''}
+    ${d.ant.length ? `<div class="sr"><span class="sec">反義</span><div class="tags">${d.ant.map(wordLink).join('')}</div></div>` : ''}`;
+}
 function openSheet(en, opts = {}) {
   const k = lc(en), w = WORD_MAP[k];
   const uses = w ? w.uses : [{ en, zh: opts.zh || '', sid: opts.sid, ctx: null }];
@@ -140,7 +154,8 @@ function openSheet(en, opts = {}) {
   sh.innerHTML = `<div class="grip"></div>
     <div class="word"><span>${esc(w ? w.en : en)}</span><button class="speak" data-say="${esc(en)}" aria-label="發音">${I.speak}</button></div>
     <div class="mean">${esc(zh)}${meanings.length > 1 ? `<div class="small muted">其他釋義：${esc(meanings.filter(m => m !== zh).join('；'))}</div>` : ''}</div>
-    ${use.ctx ? `<div class="ctx">${ctxHtml(use.ctx)}</div>` : ''}
+    ${use.ctx ? `<div class="sec">故事原句</div><div class="ctx">${ctxHtml(use.ctx)}</div>` : ''}
+    ${dictHtml(k)}
     ${others.length ? `<div class="from">也出現在：${others.map(id => `<a href="#/s/${id}?w=${encodeURIComponent(k)}">${id}. ${esc(BY_ID[id].title)}</a>`).join('、')}</div>` : ''}
     <div class="row">
       <button class="btn ghost" id="shStar">${S.star[k] ? '已在生詞本' : '加入生詞本'}</button>
@@ -154,6 +169,7 @@ function openSheet(en, opts = {}) {
     save(); closeSheet(); if (opts.onChange) opts.onChange();
   };
   sh.querySelectorAll('.from a').forEach(a => a.addEventListener('click', closeSheet));
+  sh.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { const u = itemFor(lc(b.dataset.open)); openSheet(u.en, { sid: u.sid, zh: u.zh }); });
 }
 function closeSheet() { $('#sheet').hidden = true; $('#sheetMask').hidden = true; }
 $('#sheetMask').onclick = closeSheet;
@@ -326,20 +342,19 @@ function viewCards(items, title, back, opts = {}) {
       if ($('#again')) $('#again').onclick = () => { deck = shuffle(again); again = []; idx = 0; yes = 0; draw(); };
       return;
     }
-    const it = deck[idx];
+    const it = deck[idx], k = lc(it.en);
     app.innerHTML = `
       <div class="fc-top"><span>${idx + 1} / ${deck.length}</span><span>記得 ${yes}</span></div>
       <div class="bar"><i style="width:${idx / deck.length * 100}%"></i></div>
       <div class="flip" id="flip"><div class="flip-in">
         <div class="face"><div class="big">${esc(it.en)}</div><button class="speak" style="margin-top:16px" data-say="${esc(it.en)}" aria-label="發音">${I.speak}</button>${it.ctx ? `<div class="ctx">${esc(it.ctx.before)} <b>${esc(it.en)}</b> ${esc(it.ctx.after)}</div>` : ""}<div class="hint">先在心裡說出中文，再點擊翻面</div></div>
         <div class="face back"><div class="zh">${esc(it.zh)}</div><div class="big" style="font-size:22px;margin-top:6px">${esc(it.en)}</div>
-          ${it.ctx ? `<div class="ctx">${ctxHtml(it.ctx)}</div>` : ''}<div class="hint">${BY_ID[it.sid] ? it.sid + '. ' + esc(BY_ID[it.sid].title) : ''}</div></div>
+          ${DICT[k] ? `<div class="ctx"><span class="ex-en">${esc(DICT[k].ex)}</span><br>${esc(DICT[k].exZh)}</div>${DICT[k].syn.length ? `<div class="ctx">同義：${esc(DICT[k].syn.join(', '))}${DICT[k].ant.length ? `　反義：${esc(DICT[k].ant.join(', '))}` : ''}</div>` : ''}` : it.ctx ? `<div class="ctx">${ctxHtml(it.ctx)}</div>` : ''}<div class="hint">${BY_ID[it.sid] ? it.sid + '. ' + esc(BY_ID[it.sid].title) : ''}</div></div>
       </div></div>
       <div class="row fc-btns"><button class="btn no" id="no">忘了</button><button class="btn yes" id="yes">記得</button></div>`;
     speak(it.en);
     const flip = $('#flip');
     flip.onclick = e => { if (!e.target.closest('[data-say]')) flip.classList.toggle('on'); };
-    const k = lc(it.en);
     $('#yes').onclick = () => { grade(k, true); save(); yes++; idx++; draw(); };
     $('#no').onclick = () => { grade(k, false); save(); again.push(it); idx++; draw(); };
     // swipe: right = know, left = don't know
@@ -532,13 +547,27 @@ function viewMe() {
     <div class="section-title">設定</div>
     <div class="card">
       <div class="kv"><span>深淺色</span><span class="chips">${[['', '跟隨系統'], ['light', '淺色'], ['dark', '深色']].map(([k, t]) => `<button class="chip ${S.theme === k ? 'on' : ''}" data-t="${k}">${t}</button>`).join('')}</span></div>
-      <div class="kv"><span>發音測試</span><button class="speak" data-say="Practice makes perfect" aria-label="發音">${I.speak}</button></div>
+    </div>
+    <div class="section-title">發音</div>
+    <div class="card">
+      <div class="kv"><span>口音</span><span class="chips">${[['en-GB', '英式'], ['en-US', '美式']].map(([k, t]) => `<button class="chip ${S.accent === k ? 'on' : ''}" data-ac="${k}">${t}</button>`).join('')}</span></div>
+      <div class="kv"><span>聲音</span><select class="select" id="voiceSel"></select></div>
+      <div class="kv"><span>語速</span><span class="chips">${[[0.7, '慢'], [0.9, '標準'], [1.1, '快']].map(([k, t]) => `<button class="chip ${S.rate === k ? 'on' : ''}" data-rate="${k}">${t}</button>`).join('')}</span></div>
+      <div class="kv"><span>試聽</span><button class="speak" data-say="The weather forecast predicts a substantial amount of rain." aria-label="試聽">${I.speak}</button></div>
+      <p class="small muted" style="margin:8px 0 0">聲音來自手機內建語音。iPhone 可到「設定 › 輔助使用 › 朗讀內容 › 聲音 › 英文」下載「加強版／高品質」聲音，下載後回這裡選擇，會自然很多。</p>
+    </div>
+    <div class="section-title">其他</div>
+    <div class="card">
       <div class="kv"><span>進度只存在這支手機的瀏覽器</span><span></span></div>
     </div>
     <div class="row" style="margin-top:14px"><button class="btn ghost" id="exp">匯出進度</button><button class="btn ghost" id="imp">匯入進度</button></div>
     <div class="more"><button class="btn ghost" id="reset" style="color:var(--bad)">重置所有進度</button></div>
     <p class="small muted" style="text-align:center">共 ${STORIES.length} 個故事 · ${totalItems} 個詞條</p>`;
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { S.theme = b.dataset.t; save(); applyTheme(); viewMe(); });
+  app.querySelectorAll('[data-ac]').forEach(b => b.onclick = () => { S.accent = b.dataset.ac; S.voiceName = ''; save(); pickVoice(); viewMe(); });
+  app.querySelectorAll('[data-rate]').forEach(b => b.onclick = () => { S.rate = +b.dataset.rate; save(); viewMe(); });
+  fillVoiceSelect();
+  $('#voiceSel').onchange = e => { S.voiceName = e.target.value; save(); pickVoice(); speak('Practice makes perfect.'); };
   $('#exp').onclick = async () => {
     const code = btoa(unescape(encodeURIComponent(JSON.stringify(S))));
     try { await navigator.clipboard.writeText(code); toast('進度代碼已複製'); } catch (e) { prompt('複製以下進度代碼：', code); }
@@ -551,6 +580,15 @@ function viewMe() {
     if (!confirm('確定重置所有學習進度？此動作無法復原。')) return;
     Object.assign(S, { read: {}, best: {}, known: {}, star: {}, wrong: {}, srs: {}, steps: {}, last: null, days: {} }); save(); viewMe();
   };
+}
+
+function fillVoiceSelect() {
+  const sel = $('#voiceSel'); if (!sel) return;
+  const vs = accentVoices().sort((a, b) => voiceRank(a) - voiceRank(b) || a.name.localeCompare(b.name));
+  const list = vs.length ? vs : enVoices();
+  sel.innerHTML = list.length
+    ? list.map(v => `<option value="${esc(v.name)}" ${voice && v.name === voice.name ? 'selected' : ''}>${esc(v.name.replace(/\s*\(.*\)$/, ''))}${voiceRank(v) === 0 ? '（高品質）' : ''}</option>`).join('')
+    : '<option>找不到英文語音</option>';
 }
 
 /* ================= theme & router ================= */
@@ -593,7 +631,9 @@ function route() {
 
 applyTheme();
 document.documentElement.style.setProperty('--font', S.font + 'px');
-fetch('data/stories.json')
-  .then(r => r.json())
-  .then(d => { prepare(d); addEventListener('hashchange', route); route(); })
+Promise.all([
+  fetch('data/stories.json').then(r => r.json()),
+  fetch('data/dict.json').then(r => r.json()).catch(() => ({}))
+])
+  .then(([d, dict]) => { DICT = dict; prepare(d); addEventListener('hashchange', route); route(); })
   .catch(() => { app.innerHTML = '<div class="empty">資料載入失敗，請重新整理</div>'; });
