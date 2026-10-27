@@ -3,7 +3,7 @@
 /* ================= storage ================= */
 const KEY = 'ielts-boss-story-v1';
 const S = Object.assign(
-  { read: {}, best: {}, known: {}, star: {}, wrong: {}, last: null, days: {}, mode: 'learn', font: 17, theme: '' },
+  { read: {}, best: {}, known: {}, star: {}, wrong: {}, srs: {}, steps: {}, last: null, days: {}, mode: 'learn', font: 17, theme: '' },
   load()
 );
 function load() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } }
@@ -19,6 +19,28 @@ function streak() {
     n++; d.setDate(d.getDate() - 1);
   }
 }
+
+/* ================= spaced repetition ================= */
+// Each studied word has a level; a correct recall moves it up and pushes the next review further out.
+const GAPS = [0, 1, 2, 4, 7, 15, 30, 60];
+const MASTER_LV = 4;
+const dayNo = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 6e4) / 864e5);
+function grade(k, ok) {
+  const r = S.srs[k] || { lv: 0, due: 0 };
+  r.lv = ok ? Math.min(r.lv + 1, GAPS.length - 1) : 0;
+  r.due = dayNo() + (ok ? GAPS[r.lv] : 0);
+  S.srs[k] = r;
+  if (r.lv >= MASTER_LV) S.known[k] = 1;
+  if (!ok) delete S.known[k];
+}
+const dueKeys = () => Object.keys(S.srs).filter(k => S.srs[k].due <= dayNo());
+const STEPS = [['閱讀', '中英對照讀一遍'], ['單詞卡', '逐個確認記不記得'], ['回想', '遮住中文讀第二遍'], ['測驗', '答對 80% 以上']];
+const stepsOf = id => { const a = (S.steps[id] || [false, false, false, false]).slice(); a[0] = !!S.read[id]; return a; };
+function setStep(id, i) { const a = stepsOf(id); a[i] = true; S.steps[id] = a; if (i === 0) S.read[id] = S.read[id] || Date.now(); save(); }
+function dueItems() {
+  return dueKeys().sort((a, b) => S.srs[a].lv - S.srs[b].lv || S.srs[a].due - S.srs[b].due).slice(0, 50).map(itemFor).filter(Boolean);
+}
+const learned = k => S.known[k] || (S.srs[k] && S.srs[k].lv > 0);
 
 /* ================= data ================= */
 let STORIES = [], BY_ID = {}, WORDS = [], WORD_MAP = {};
@@ -73,6 +95,7 @@ const svg = (d, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hi
 const I = {
   speak: svg('<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>'),
   chev: svg('<path d="M9 5l7 7-7 7"/>'),
+  check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   star: svg('<path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 17l-5.4 3 1.2-6-4.5-4.2 6.1-.7z"/>'),
   starOn: svg('<path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 17l-5.4 3 1.2-6-4.5-4.2 6.1-.7z"/>', 'fill')
 };
@@ -94,7 +117,7 @@ function speak(text) {
   speechSynthesis.speak(u);
 }
 
-const storyKnown = st => st.items.filter(it => S.known[lc(it.en)]).length;
+const storyLearned = st => st.items.filter(it => learned(lc(it.en))).length;
 
 function setTop(title, back) {
   $('#pageTitle').textContent = title;
@@ -127,7 +150,7 @@ function openSheet(en, opts = {}) {
   speak(en);
   $('#shStar').onclick = () => { if (S.star[k]) delete S.star[k]; else S.star[k] = 1; save(); openSheet(en, opts); toast(S.star[k] ? '已加入生詞本' : '已移出生詞本'); };
   $('#shKnown').onclick = () => {
-    if (S.known[k]) delete S.known[k]; else { S.known[k] = 1; touchDay(); }
+    if (S.known[k]) { delete S.known[k]; if (S.srs[k]) S.srs[k].lv = Math.min(S.srs[k].lv, MASTER_LV - 1); } else { S.known[k] = 1; S.srs[k] = { lv: 6, due: dayNo() + GAPS[6] }; touchDay(); }
     save(); closeSheet(); if (opts.onChange) opts.onChange();
   };
   sh.querySelectorAll('.from a').forEach(a => a.addEventListener('click', closeSheet));
@@ -138,10 +161,19 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-say]
 
 /* ================= views ================= */
 let homeFilter = 'all', homeQuery = '';
+function reviewCard() {
+  const due = dueKeys().length, total = Object.keys(S.srs).length;
+  if (!total) return `<div class="card review-card"><div class="t"><b>從第 1 個故事開始</b><div class="small muted">每篇照「閱讀 → 單詞卡 → 回想 → 測驗」四步走，學過的單詞會按記憶曲線安排複習</div></div><a class="btn" href="#/s/${S.last || 1}">開始</a></div>`;
+  if (!due) {
+    const tmr = Object.values(S.srs).filter(r => r.due === dayNo() + 1).length;
+    return `<div class="card review-card"><div class="t"><b>今天的複習完成了</b><div class="small muted">明天有 ${tmr} 個單詞要複習 · 共 ${total} 個單詞在記憶排程中</div></div></div>`;
+  }
+  return `<div class="card review-card on"><div class="t"><b>今日複習 ${due} 個單詞</b><div class="small muted">先複習再學新故事，記得更牢</div></div><a class="btn" href="#/review">開始複習</a></div>`;
+}
 function viewHome() {
   setTop('霸總雅思單詞'); setTab('home');
   const doneN = Object.keys(S.read).length;
-  const knownN = Object.keys(S.known).length;
+  const learnedN = Object.keys(S.srs).length;
   const last = S.last && BY_ID[S.last];
   app.innerHTML = `
     <section class="hero">
@@ -149,29 +181,30 @@ function viewHome() {
       <p>${STORIES.length} 個故事 · ${WORDS.length.toLocaleString()} 個核心單詞</p>
       <div class="stats">
         <div class="stat"><b>${doneN}</b><span>讀完故事</span></div>
-        <div class="stat"><b>${knownN}</b><span>已掌握單詞</span></div>
+        <div class="stat"><b>${learnedN}</b><span>學過單詞</span></div>
         <div class="stat"><b>${streak()}</b><span>連續天數</span></div>
       </div>
     </section>
-    ${last ? `<a class="card continue" href="#/s/${last.id}"><div class="num">${last.id}<i style="width:${storyKnown(last) / last.items.length * 100}%"></i></div><div class="t"><div class="small muted">繼續學習</div><div>${esc(last.title)}</div></div><span class="arrow">${I.chev}</span></a>` : ''}
+    ${reviewCard()}
+    ${last ? `<a class="card continue" href="#/s/${last.id}"><div class="num">${last.id}<i style="width:${storyLearned(last) / last.items.length * 100}%"></i></div><div class="t"><div class="small muted">繼續學習</div><div>${esc(last.title)}</div></div><span class="arrow">${I.chev}</span></a>` : ''}
     <div class="section-title">全部故事</div>
     <input class="search" id="q" type="search" placeholder="搜尋故事標題或單詞…" value="${esc(homeQuery)}">
     <div class="chips" style="margin:10px 0 12px">
-      ${[['all', '全部'], ['todo', '未讀完'], ['done', '已讀完']].map(([k, t]) => `<button class="chip ${homeFilter === k ? 'on' : ''}" data-f="${k}">${t}</button>`).join('')}
+      ${[['all', '全部'], ['todo', '未完成'], ['done', '已完成']].map(([k, t]) => `<button class="chip ${homeFilter === k ? 'on' : ''}" data-f="${k}">${t}</button>`).join('')}
     </div>
     <div class="story-list" id="list"></div>`;
   const draw = () => {
     const q = lc(homeQuery.trim());
     const list = STORIES.filter(st =>
-      (homeFilter === 'all' || (homeFilter === 'done') === !!S.read[st.id]) &&
+      (homeFilter === 'all' || (homeFilter === 'done') === stepsOf(st.id).every(Boolean)) &&
       (!q || st.title.includes(homeQuery.trim()) || String(st.id) === q || st.items.some(it => lc(it.en) === q)));
     $('#list').innerHTML = list.length ? list.map(st => {
-      const k = storyKnown(st), pct = k / st.items.length;
+      const k = storyLearned(st), pct = k / st.items.length, done = stepsOf(st.id).filter(Boolean).length;
       return `<a class="card story-item" href="#/s/${st.id}">
         <div class="num">${st.id}<i style="width:${pct * 100}%"></i></div>
         <div class="info"><div class="title">${esc(st.title)}</div>
-          <div class="meta"><span>${st.items.length} 詞</span><span>已掌握 ${k}</span>
-            ${S.read[st.id] ? '<span class="badge">已讀</span>' : ''}${S.best[st.id] != null ? `<span class="badge gold">測驗 ${S.best[st.id]}%</span>` : ''}</div></div>
+          <div class="meta"><span>${st.items.length} 詞</span><span>已學 ${k}</span>
+            ${done === 4 ? '<span class="badge">完成</span>' : done ? `<span class="badge gold">步驟 ${done}/4</span>` : ''}</div></div>
         <span class="arrow">${I.chev}</span></a>`;
     }).join('') : '<div class="empty">沒有符合的故事</div>';
   };
@@ -190,26 +223,30 @@ function viewStory(id, focusWord) {
   S.last = id; save();
   setTop(`${st.id}. ${st.title}`, '#/'); setTab(null);
   const mode = S.mode;
+  const steps = stepsOf(id), nextStep = steps.indexOf(false);
   const paraHtml = p => '<p>' + p.map((x, i) => {
     if (!Array.isArray(x)) return esc(x);
     const k = lc(x[0]);
-    const cls = 'w' + (S.known[k] ? ' known' : '') + (mode === 'review' ? ' blank' : '') + (mode === 'recall' ? ' hide-en' : '');
+    const cls = 'w' + (learned(k) ? ' known' : '') + (mode === 'review' ? ' blank' : '') + (mode === 'recall' ? ' hide-en' : '');
     return `<button class="${cls}" data-w="${esc(x[0])}" data-z="${esc(x[1])}"><span class="en">${esc(x[0])}</span><span class="g">（${esc(x[1])}）</span></button>`;
   }).join('') + '</p>';
   const prev = BY_ID[id - 1], next = BY_ID[id + 1];
   app.innerHTML = `
     <div class="reader-head">
-      <div class="small muted">Story ${String(st.id).padStart(2, '0')} · ${st.items.length} 個重點單詞 · 已掌握 ${storyKnown(st)}</div>
+      <div class="small muted">Story ${String(st.id).padStart(2, '0')} · ${st.items.length} 個重點單詞 · 已學 ${storyLearned(st)}</div>
       <h2>${esc(st.title)}</h2>
+      <div class="steps">${STEPS.map(([t, d], i) => `<button data-step="${i}" class="${steps[i] ? 'done' : ''} ${i === nextStep ? 'next' : ''}"><span class="n">${steps[i] ? I.check : i + 1}</span><b>${t}</b><small>${d}</small></button>`).join('')}</div>
       <div class="seg">${Object.entries(MODES).map(([k, [t]]) => `<button data-m="${k}" class="${mode === k ? 'on' : ''}">${t}</button>`).join('')}</div>
       <div class="mode-tip">${MODES[mode][1]}</div>
       <div class="tools">
-        ${mode !== 'learn' ? '<button class="chip" id="revealAll">全部揭曉</button>' : '<span class="small muted">綠色 = 已掌握</span>'}
+        ${mode !== 'learn' ? '<button class="chip" id="revealAll">全部揭曉</button>' : '<span class="small muted">綠色 = 已學過</span>'}
         <div class="fs"><button id="fsDown">A-</button><button id="fsUp">A+</button></div>
       </div>
     </div>
     <article class="story" id="story">${st.paras.map(paraHtml).join('')}</article>
-    <button class="btn ${S.read[id] ? 'ghost' : ''} block" id="doneBtn">${S.read[id] ? '已讀完（再按一次取消）' : '讀完了，打卡'}</button>
+    ${mode === 'learn'
+      ? `<button class="btn ${steps[0] ? 'ghost' : ''} block" id="doneBtn">${steps[0] ? '已讀完 · 下一步：單詞卡' : '讀完了，進入下一步'}</button>`
+      : `<button class="btn ${steps[2] ? 'ghost' : ''} block" id="doneBtn">${steps[2] ? '已完成回想 · 下一步：測驗' : '回想完成，進入下一步'}</button>`}
     <div class="pager">
       ${prev ? `<a href="#/s/${prev.id}"><div class="small">上一篇</div>${prev.id}. ${esc(prev.title)}</a>` : '<span></span>'}
       ${next ? `<a href="#/s/${next.id}"><div class="small">下一篇</div>${next.id}. ${esc(next.title)}</a>` : '<span></span>'}
@@ -221,12 +258,19 @@ function viewStory(id, focusWord) {
     </div>`;
   document.documentElement.style.setProperty('--font', S.font + 'px');
   app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { S.mode = b.dataset.m; save(); keepScroll(() => viewStory(id)); });
+  app.querySelectorAll('[data-step]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.step;
+    if (i === 1) return (location.hash = `#/s/${id}/cards`);
+    if (i === 3) return (location.hash = `#/s/${id}/quiz`);
+    S.mode = i === 0 ? 'learn' : 'review'; save(); viewStory(id); scrollTo(0, $('#story').offsetTop - 70);
+  });
   $('#fsUp').onclick = () => { S.font = Math.min(24, S.font + 1); save(); document.documentElement.style.setProperty('--font', S.font + 'px'); };
   $('#fsDown').onclick = () => { S.font = Math.max(14, S.font - 1); save(); document.documentElement.style.setProperty('--font', S.font + 'px'); };
   if ($('#revealAll')) $('#revealAll').onclick = () => app.querySelectorAll('.w').forEach(w => w.classList.add('show'));
   $('#doneBtn').onclick = () => {
-    if (S.read[id]) delete S.read[id]; else { S.read[id] = Date.now(); touchDay(); toast('已打卡'); }
-    save(); keepScroll(() => viewStory(id));
+    touchDay();
+    if (mode === 'learn') { setStep(id, 0); location.hash = `#/s/${id}/cards`; }
+    else { setStep(id, 2); location.hash = `#/s/${id}/quiz`; }
   };
   $('#story').onclick = e => {
     const w = e.target.closest('.w'); if (!w) return;
@@ -267,37 +311,37 @@ function viewStoryList(id) {
 }
 
 /* ---------- flashcards ---------- */
-function viewCards(items, title, back, onFinish) {
+function viewCards(items, title, back, opts = {}) {
   setTop(title, back); setTab(null);
-  if (!items.length) { app.innerHTML = '<div class="empty"><b>🃏</b>這裡還沒有單詞</div>'; return; }
+  if (!items.length) { app.innerHTML = '<div class="empty">這裡還沒有單詞</div>'; return; }
   let deck = shuffle(items), idx = 0, yes = 0, again = [];
   const draw = () => {
     if (idx >= deck.length) {
-      touchDay(); if (onFinish) onFinish();
-      app.innerHTML = `<div class="card result"><div class="crown">🃏</div><h2>本輪完成！</h2>
-        <p class="muted">認識 ${yes} / ${deck.length}</p>
+      touchDay(); if (opts.onFinish) opts.onFinish();
+      app.innerHTML = `<div class="card result"><div class="label">本輪完成</div><h2 style="margin:6px 0">${yes} / ${deck.length}</h2>
+        <p class="muted">${opts.doneMsg || '記得的單詞會在幾天後再出現，加深記憶'}</p>
         <div class="row" style="margin-top:18px">
-          ${again.length ? '<button class="btn ghost" id="again">再練不認識的 ' + again.length + ' 個</button>' : ''}
+          ${again.length ? '<button class="btn ghost" id="again">再練 ' + again.length + ' 個</button>' : ''}
           <a class="btn" href="${back}">完成</a></div></div>`;
       if ($('#again')) $('#again').onclick = () => { deck = shuffle(again); again = []; idx = 0; yes = 0; draw(); };
       return;
     }
     const it = deck[idx];
     app.innerHTML = `
-      <div class="fc-top"><span>${idx + 1} / ${deck.length}</span><span>認識 ${yes}</span></div>
+      <div class="fc-top"><span>${idx + 1} / ${deck.length}</span><span>記得 ${yes}</span></div>
       <div class="bar"><i style="width:${idx / deck.length * 100}%"></i></div>
       <div class="flip" id="flip"><div class="flip-in">
-        <div class="face"><div class="big">${esc(it.en)}</div><button class="speak" style="margin-top:16px" data-say="${esc(it.en)}" aria-label="發音">${I.speak}</button><div class="hint">點擊翻面</div></div>
+        <div class="face"><div class="big">${esc(it.en)}</div><button class="speak" style="margin-top:16px" data-say="${esc(it.en)}" aria-label="發音">${I.speak}</button>${it.ctx ? `<div class="ctx">${esc(it.ctx.before)} <b>${esc(it.en)}</b> ${esc(it.ctx.after)}</div>` : ""}<div class="hint">先在心裡說出中文，再點擊翻面</div></div>
         <div class="face back"><div class="zh">${esc(it.zh)}</div><div class="big" style="font-size:22px;margin-top:6px">${esc(it.en)}</div>
           ${it.ctx ? `<div class="ctx">${ctxHtml(it.ctx)}</div>` : ''}<div class="hint">${BY_ID[it.sid] ? it.sid + '. ' + esc(BY_ID[it.sid].title) : ''}</div></div>
       </div></div>
-      <div class="row fc-btns"><button class="btn no" id="no">不認識</button><button class="btn yes" id="yes">認識</button></div>`;
+      <div class="row fc-btns"><button class="btn no" id="no">忘了</button><button class="btn yes" id="yes">記得</button></div>`;
     speak(it.en);
     const flip = $('#flip');
     flip.onclick = e => { if (!e.target.closest('[data-say]')) flip.classList.toggle('on'); };
     const k = lc(it.en);
-    $('#yes').onclick = () => { S.known[k] = 1; save(); yes++; idx++; draw(); };
-    $('#no').onclick = () => { delete S.known[k]; S.star[k] = 1; save(); again.push(it); idx++; draw(); };
+    $('#yes').onclick = () => { grade(k, true); save(); yes++; idx++; draw(); };
+    $('#no').onclick = () => { grade(k, false); save(); again.push(it); idx++; draw(); };
     // swipe: right = know, left = don't know
     let x0 = null;
     flip.ontouchstart = e => { x0 = e.touches[0].clientX; };
@@ -310,6 +354,12 @@ function viewCards(items, title, back, onFinish) {
 }
 
 /* ---------- quiz ---------- */
+const kind = zh => /的$/.test(zh) ? 'adj' : /地$/.test(zh) ? 'adv' : 'other';
+let KIND_POOL = null;
+function sameKind(it) {
+  if (!KIND_POOL) { KIND_POOL = { adj: [], adv: [], other: [] }; WORDS.forEach(w => KIND_POOL[kind(w.uses[0].zh)].push(w.uses[0])); }
+  return shuffle(KIND_POOL[kind(it.zh)]).slice(0, 8);
+}
 const QTYPES = { e2z: '看英文選中文', z2e: '看中文選英文', cloze: '故事填空', spell: '拼寫單詞' };
 function makeQuiz(items, n) {
   const pool = items.length >= 4 ? items : items.concat(shuffle(WORDS).slice(0, 12).map(w => w.uses[0]));
@@ -319,7 +369,9 @@ function makeQuiz(items, n) {
     let type = order[i % order.length];
     if (type === 'cloze' && !it.ctx) type = 'z2e';
     if (type === 'spell' && it.en.length > 14) type = 'e2z';
-    const distract = shuffle(pool.filter(o => lc(o.en) !== lc(it.en) && o.zh !== it.zh));
+    // prefer options of the same kind (形容詞/副詞/其他) so the answer can't be guessed from the gloss ending
+    const near = shuffle(pool.concat(sameKind(it))).filter(o => lc(o.en) !== lc(it.en) && o.zh !== it.zh);
+    const distract = near.filter(o => kind(o.zh) === kind(it.zh)).concat(near.filter(o => kind(o.zh) !== kind(it.zh)));
     const seenEn = new Set([lc(it.en)]), seenZh = new Set([it.zh]), opts = [it];
     for (const o of distract) {
       if (opts.length >= 4) break;
@@ -338,18 +390,19 @@ function viewQuiz(items, title, back, opts = {}) {
     const k = lc(it.en);
     if (ok) {
       score++;
+      grade(k, true);
       if (opts.mistakes && S.wrong[k]) { S.wrong[k].n--; if (S.wrong[k].n <= 0) delete S.wrong[k]; }
     } else {
       wrongs.push(it);
       const w = S.wrong[k] || { en: it.en, zh: it.zh, sid: it.sid, n: 0 };
-      w.n++; w.t = Date.now(); S.wrong[k] = w; delete S.known[k];
+      w.n++; w.t = Date.now(); S.wrong[k] = w; grade(k, false);
     }
     save();
   };
   const draw = () => {
     if (idx >= qs.length) {
       const pct = Math.round(score / qs.length * 100);
-      if (opts.sid) S.best[opts.sid] = Math.max(S.best[opts.sid] || 0, pct);
+      if (opts.sid) { S.best[opts.sid] = Math.max(S.best[opts.sid] || 0, pct); if (pct >= 80) setStep(opts.sid, 3); }
       touchDay();
       app.innerHTML = `<div class="card result">
         <div class="label">本次得分</div>
@@ -466,14 +519,16 @@ function viewMe() {
   app.innerHTML = `
     <div class="card">
       <div class="kv"><span>讀完故事</span><b>${Object.keys(S.read).length} / ${STORIES.length}</b></div>
-      <div class="kv"><span>已掌握單詞</span><b>${Object.keys(S.known).length} / ${WORDS.length}</b></div>
+      <div class="kv"><span>學過的單詞</span><b>${Object.keys(S.srs).length} / ${WORDS.length}</b></div>
+      <div class="kv"><span>已掌握（連續答對 ${MASTER_LV} 次以上）</span><b>${Object.keys(S.known).length}</b></div>
+      <div class="kv"><span>今天待複習</span><b>${dueKeys().length}</b></div>
       <div class="kv"><span>生詞本</span><b>${Object.keys(S.star).length}</b></div>
       <div class="kv"><span>錯題</span><b>${Object.keys(S.wrong).length}</b></div>
       <div class="kv"><span>連續學習</span><b>${streak()} 天</b></div>
       <div class="kv"><span>學習天數</span><b>${Object.keys(S.days).length} 天</b></div>
     </div>
-    <div class="section-title">故事進度 <span class="small muted">深色 = 讀完，淺色 = 學過單詞</span></div>
-    <div class="heat">${STORIES.map(st => `<a href="#/s/${st.id}" class="${S.read[st.id] ? 'd' : storyKnown(st) ? 'r' : ''}">${st.id}</a>`).join('')}</div>
+    <div class="section-title">故事進度 <span class="small muted">深色 = 四步完成，淺色 = 進行中</span></div>
+    <div class="heat">${STORIES.map(st => `<a href="#/s/${st.id}" class="${stepsOf(st.id).every(Boolean) ? 'd' : stepsOf(st.id).some(Boolean) ? 'r' : ''}">${st.id}</a>`).join('')}</div>
     <div class="section-title">設定</div>
     <div class="card">
       <div class="kv"><span>深淺色</span><span class="chips">${[['', '跟隨系統'], ['light', '淺色'], ['dark', '深色']].map(([k, t]) => `<button class="chip ${S.theme === k ? 'on' : ''}" data-t="${k}">${t}</button>`).join('')}</span></div>
@@ -494,7 +549,7 @@ function viewMe() {
   };
   $('#reset').onclick = () => {
     if (!confirm('確定重置所有學習進度？此動作無法復原。')) return;
-    Object.assign(S, { read: {}, best: {}, known: {}, star: {}, wrong: {}, last: null, days: {} }); save(); viewMe();
+    Object.assign(S, { read: {}, best: {}, known: {}, star: {}, wrong: {}, srs: {}, steps: {}, last: null, days: {} }); save(); viewMe();
   };
 }
 
@@ -516,11 +571,12 @@ function route() {
   scrollTo(0, 0);
   if (parts[0] === 's' && BY_ID[+parts[1]]) {
     const id = +parts[1], st = BY_ID[id];
-    if (parts[2] === 'cards') return viewCards(st.items, `${id}. 單詞卡`, `#/s/${id}`);
+    if (parts[2] === 'cards') return viewCards(st.items, `${id}. 單詞卡`, `#/s/${id}`, { onFinish: () => setStep(id, 1), doneMsg: '下一步：回到故事，用「複習」模式遮住中文再讀一遍' });
     if (parts[2] === 'quiz') return viewQuiz(st.items, `${id}. 測驗`, `#/s/${id}`, { sid: id });
     if (parts[2] === 'list') return viewStoryList(id);
     return viewStory(id, params.get('w'));
   }
+  if (parts[0] === 'review') return viewCards(dueItems(), '今日複習', '#/', { doneMsg: '忘了的單詞已排回明天之前，記得的會在更久之後再出現' });
   if (parts[0] === 'words') return viewWords();
   if (parts[0] === 'star') {
     if (parts[1] === 'cards') return viewCards(starItems(), '生詞卡', '#/words');
