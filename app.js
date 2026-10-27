@@ -228,6 +228,22 @@ function setTab(tab) {
 }
 const posOf = k => (DICT[k] && DICT[k].pos) || '';
 
+/* ---------- press feedback ---------- */
+// iOS Safari only shows :active when a touch listener exists, and drops it on quick taps;
+// add a .pressed class on touch-down and keep it long enough to be seen.
+const PRESSABLE = '.btn, .opt, .speak, .chip, .seg button, .steps button, .list-item, .wl-item, .task .t, .tabbar a, .icon-btn, .star, .text-btn, .pager a';
+document.addEventListener('touchstart', () => {}, { passive: true });
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest(PRESSABLE); if (!el || el.disabled) return;
+  el.classList.add('pressed');
+  const t0 = performance.now();
+  const release = () => {
+    setTimeout(() => el.classList.remove('pressed'), Math.max(0, 120 - (performance.now() - t0)));
+    ['pointerup', 'pointercancel'].forEach(t => document.removeEventListener(t, release));
+  };
+  ['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, release));
+});
+
 /* ================= word sheet ================= */
 const wordLink = x => WORD_MAP[lc(x)] ? `<button class="tag link" data-open="${esc(x)}">${esc(x)}</button>` : `<span class="tag">${esc(x)}</span>`;
 const pairKey = (a, b) => [lc(a), lc(b)].sort().join('|');

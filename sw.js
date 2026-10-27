@@ -1,5 +1,5 @@
 // Offline support. VERSION must match the ?v= in index.html; run tools/bump_version.py to change both.
-const VERSION = '20261027-5';
+const VERSION = '20261027-6';
 const CACHE = 'ielts-boss-story-' + VERSION;
 const ASSETS = [
   './', './index.html', './manifest.webmanifest',

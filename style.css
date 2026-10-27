@@ -87,17 +87,19 @@ main { max-width: 720px; margin: 0 auto; padding: 16px; }
 
 /* ---------- press feedback: buttons sit on a darker base and sink when pressed ---------- */
 .btn, .opt, .speak, .chip { transition: transform .08s ease-out, box-shadow .08s ease-out, background-color .15s, border-color .15s; }
-.btn { box-shadow: 0 3px 0 var(--brand-deep); }
-.btn.ghost, .opt, .speak { box-shadow: 0 3px 0 var(--line-deep); }
+.btn { box-shadow: 0 4px 0 var(--brand-deep); }
+.btn.ghost, .opt, .speak { box-shadow: 0 4px 0 var(--line-deep); }
 .chip { box-shadow: 0 2px 0 var(--line-deep); }
 .chip.on { box-shadow: 0 2px 0 var(--brand-deep); }
-.btn:active, .opt:active, .speak:active { transform: translateY(3px); box-shadow: 0 0 0 transparent; }
-.chip:active { transform: translateY(2px); box-shadow: 0 0 0 transparent; }
-.opt:disabled, .opt:disabled:active { transform: none; box-shadow: 0 3px 0 var(--line-deep); }
-.opt.right { box-shadow: 0 3px 0 var(--ok); animation: pop .32s ease-out; }
-.opt.wrong { box-shadow: 0 3px 0 var(--bad); }
-.list-item:active, .wl-item:active, .task .t:active, .seg button:active, .steps button:active, .tabbar a:active, .icon-btn:active, .star:active { background: var(--surface-2); }
-.tabbar a:active .ic { transform: scale(.88); }
+/* .pressed is added by app.js on touch-down: iOS Safari skips :active on quick taps */
+.btn:active, .opt:active, .speak:active, .btn.pressed, .opt.pressed, .speak.pressed { transform: translateY(4px); box-shadow: 0 0 0 transparent; filter: brightness(.94); }
+.chip:active, .chip.pressed { transform: translateY(2px); box-shadow: 0 0 0 transparent; filter: brightness(.94); }
+.opt:disabled, .opt:disabled:active, .opt.pressed:disabled { transform: none; box-shadow: 0 4px 0 var(--line-deep); filter: none; }
+.opt.right, .opt.right:disabled { box-shadow: 0 4px 0 var(--ok); animation: pop .32s ease-out; }
+.opt.wrong, .opt.wrong:disabled { box-shadow: 0 4px 0 var(--bad); }
+.list-item:active, .wl-item:active, .task .t:active, .seg button:active, .steps button:active, .tabbar a:active, .icon-btn:active, .star:active, .pager a:active,
+.list-item.pressed, .wl-item.pressed, .task .t.pressed, .seg button.pressed, .steps button.pressed, .tabbar a.pressed, .icon-btn.pressed, .star.pressed, .pager a.pressed { background: var(--surface-2); }
+.tabbar a:active .ic, .tabbar a.pressed .ic { transform: scale(.86); }
 .tabbar a .ic { transition: transform .1s; }
 .speak.playing { color: var(--brand-ink); background: var(--brand); border-color: var(--brand); box-shadow: 0 3px 0 var(--brand-deep); }
 .speak.playing .ic { animation: beat .6s ease-in-out infinite; }
@@ -235,7 +237,7 @@ a.note { color: var(--word); }
   display: flex; background: var(--bg); border: 1px solid var(--line); margin-top: 12px;
 }
 .dock .btn { border: 0; border-radius: 0; box-shadow: none; }
-.dock .btn:active { transform: none; box-shadow: none; filter: brightness(.92); }
+.dock .btn:active, .dock .btn.pressed { transform: none; box-shadow: none; filter: brightness(.88); }
 .dock .btn.ghost { flex: none; width: 88px; border-right: 1px solid var(--line); }
 .dock .btn:not(.ghost) { flex: 1; padding: 0 10px; }
 
@@ -270,7 +272,7 @@ a.note { color: var(--word); }
 .from { font-size: 13px; color: var(--muted); margin: 6px 0 14px; }
 .from a { color: var(--word); text-decoration: underline; }
 .speak { border: 1px solid var(--line); background: var(--surface); color: var(--brand); width: 36px; height: 36px; border-radius: var(--radius); flex: none; display: inline-grid; place-items: center; padding: 0; }
-.speak:active { background: var(--brand-soft); }
+.speak:active, .speak.pressed { background: var(--brand-soft); }
 .speak.sm { width: 30px; height: 30px; }
 .speak.sm .ic { width: 16px; height: 16px; }
 @keyframes up { from { transform: translateY(100%); } }
@@ -300,9 +302,9 @@ a.note { color: var(--word); }
 .face .ctx { font-size: 14px; color: var(--muted); margin-top: 12px; line-height: 1.6; }
 .face .ctx b { color: var(--word); }
 .face .ctx .ex-en { display: inline; font-size: 15px; color: var(--text); }
-.fc-btns .btn.no { background: var(--surface); border-color: var(--bad); color: var(--bad); box-shadow: 0 3px 0 var(--bad); }
-.fc-btns .btn.yes { background: var(--surface); border-color: var(--ok); color: var(--ok); box-shadow: 0 3px 0 var(--ok); }
-.fc-btns .btn:active { box-shadow: 0 0 0 transparent; }
+.fc-btns .btn.no { background: var(--surface); border-color: var(--bad); color: var(--bad); box-shadow: 0 4px 0 var(--bad); }
+.fc-btns .btn.yes { background: var(--surface); border-color: var(--ok); color: var(--ok); box-shadow: 0 4px 0 var(--ok); }
+.fc-btns .btn:active, .fc-btns .btn.pressed { box-shadow: 0 0 0 transparent; }
 .q-type { display: inline-block; font-size: 12px; padding: 1px 8px; border: 1px solid var(--brand); color: var(--brand); font-weight: 600; margin-bottom: 12px; }
 .q-stem { font-size: 20px; font-weight: 700; margin-bottom: 18px; line-height: 1.6; }
 .q-stem .en { font-size: 30px; display: flex; align-items: center; gap: 12px; }
@@ -379,7 +381,7 @@ a.note { color: var(--word); }
 .memo { font-size: 14px; margin-bottom: 14px; }
 .face .roots { justify-content: center; margin-top: 12px; }
 .text-btn { display: block; margin: 14px auto 0; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; padding: 6px 10px; }
-.text-btn:active { color: var(--text); }
+.text-btn:active, .text-btn.pressed { color: var(--text); }
 .q-stem .row .btn.listen { flex: 3; }
 .q-stem .row .btn.slow { flex: 1; min-width: 72px; color: var(--muted); }
 .dict-sent { font-family: Georgia, serif; font-size: 18px; font-weight: 400; line-height: 1.8; margin-top: 14px; }
