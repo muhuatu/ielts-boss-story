@@ -851,9 +851,11 @@ function route() {
 
 applyTheme();
 document.documentElement.style.setProperty('--font', S.font + 'px');
+// the version in index.html's script URL also busts the cache for the data files
+const VER = new URL(document.currentScript.src).searchParams.get('v') || '';
 Promise.all([
-  fetch('data/stories.json').then(r => r.json()),
-  fetch('data/dict.json').then(r => r.json()).catch(() => ({}))
+  fetch(`data/stories.json?v=${VER}`).then(r => r.json()),
+  fetch(`data/dict.json?v=${VER}`).then(r => r.json()).catch(() => ({}))
 ])
   .then(([d, dict]) => { DICT = dict; prepare(d); addEventListener('hashchange', route); route(); })
   .catch(() => { app.innerHTML = '<div class="empty">資料載入失敗，請重新整理</div>'; });
