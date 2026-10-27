@@ -142,12 +142,23 @@ function pickVoice() {
   if ($('#voiceSel')) fillVoiceSelect();
 }
 if ('speechSynthesis' in window) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
-function speak(text) {
+function speak(text, btn) {
   if (!('speechSynthesis' in window)) return toast('此瀏覽器不支援發音');
   speechSynthesis.cancel();
+  document.querySelectorAll('.playing').forEach(b => b.classList.remove('playing'));
   const u = new SpeechSynthesisUtterance(text);
   u.lang = voice ? voice.lang : S.accent; if (voice) u.voice = voice; u.rate = S.rate;
+  if (btn) { btn.classList.add('playing'); u.onend = u.onerror = () => btn.classList.remove('playing'); }
   speechSynthesis.speak(u);
+}
+// short vibration where supported (Android); iOS Safari ignores it
+const haptic = kind => { try { navigator.vibrate && navigator.vibrate(kind === 'bad' ? [30, 50, 30] : kind === 'ok' ? 18 : 8); } catch (e) { /* unsupported */ } };
+function shake(el) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); }
+function countUp(el, to) {
+  if (!el || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const t0 = performance.now(), dur = 600;
+  const tick = t => { const k = Math.min(1, (t - t0) / dur); el.firstChild.nodeValue = Math.round(to * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
 }
 
 function setTop(title, back) {
@@ -211,7 +222,7 @@ function openSheet(en, opts = {}) {
 }
 function closeSheet() { $('#sheet').hidden = true; $('#sheetMask').hidden = true; }
 $('#sheetMask').onclick = closeSheet;
-document.addEventListener('click', e => { const b = e.target.closest('[data-say]'); if (b) { e.stopPropagation(); speak(b.dataset.say); } });
+document.addEventListener('click', e => { const b = e.target.closest('[data-say]'); if (b) { e.stopPropagation(); speak(b.dataset.say, b); } });
 
 /* ================= 今日 ================= */
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
@@ -403,18 +414,19 @@ function viewCards(items, title, back, opts = {}) {
   const draw = () => {
     if (idx >= deck.length) {
       touchDay(); if (opts.onFinish) opts.onFinish();
-      app.innerHTML = `<div class="result"><div class="label">本輪完成</div><div class="score">${yes}<span>/ ${deck.length}</span></div>
+      app.innerHTML = `<div class="result"><div class="label">本輪完成</div><div class="score" id="score">${yes}<span>/ ${deck.length}</span></div>
         <p class="muted">${opts.doneMsg || '記得的單詞會在幾天後再出現'}</p>
         <div class="row">${again.length ? `<button class="btn ghost" id="again">再看忘了的 ${again.length} 個</button>` : ''}
           <a class="btn" href="${opts.nextHref || back}">${opts.nextLabel || '完成'}</a></div></div>`;
       if ($('#again')) $('#again').onclick = () => { deck = shuffle(again); again = []; idx = 0; yes = 0; draw(); };
+      countUp($('#score'), yes);
       return;
     }
     const it = deck[idx], k = lc(it.en), d = DICT[k];
     app.innerHTML = `
       <div class="fc-top"><span>${idx + 1} / ${deck.length}</span><span>記得 ${yes}</span></div>
       <div class="bar"><i style="width:${idx / deck.length * 100}%"></i></div>
-      <div class="flip" id="flip"><div class="flip-in">
+      <div class="flip enter" id="flip"><span class="stamp yes">記得</span><span class="stamp no">忘了</span><div class="flip-in">
         <div class="face"><div class="big">${esc(it.en)}</div>${posOf(k) ? `<div class="pos">${esc(posOf(k))}</div>` : ''}
           <button class="speak" style="margin-top:14px" data-say="${esc(it.en)}" aria-label="發音">${I.speak}</button>
           ${it.ctx ? `<div class="ctx">${esc(it.ctx.before)} <b>${esc(it.en)}</b> ${esc(it.ctx.after)}</div>` : ''}
@@ -427,14 +439,40 @@ function viewCards(items, title, back, opts = {}) {
       <div class="row fc-btns"><button class="btn no" id="no">忘了</button><button class="btn yes" id="yes">記得</button></div>`;
     speak(it.en);
     const flip = $('#flip');
-    flip.onclick = e => { if (!e.target.closest('[data-say]')) flip.classList.toggle('on'); };
-    $('#yes').onclick = () => { grade(k, 'ok'); save(); yes++; idx++; draw(); };
-    $('#no').onclick = () => { grade(k, 'bad'); save(); again.push(it); idx++; draw(); };
-    let x0 = null; // swipe: right = remembered, left = forgot
-    flip.ontouchstart = e => { x0 = e.touches[0].clientX; };
-    flip.ontouchend = e => {
-      if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null;
-      if (dx > 70) $('#yes').click(); else if (dx < -70) $('#no').click();
+    let busy = false;
+    // the card flies off to the side it was answered with, then the next one comes in
+    const answer = ok => {
+      if (busy) return; busy = true;
+      haptic(ok ? 'ok' : 'tap');
+      grade(k, ok ? 'ok' : 'bad'); save();
+      if (ok) yes++; else again.push(it);
+      flip.style.transition = 'transform .28s ease-in, opacity .28s';
+      flip.style.transform = `translateX(${ok ? 120 : -120}%) rotate(${ok ? 12 : -12}deg)`;
+      flip.style.opacity = '0';
+      setTimeout(() => { idx++; draw(); }, 240);
+    };
+    flip.onclick = e => { if (!moved && !e.target.closest('[data-say]')) flip.classList.toggle('on'); };
+    $('#yes').onclick = () => answer(true);
+    $('#no').onclick = () => answer(false);
+    // drag: the card follows the finger; past the threshold it counts as an answer
+    let x0 = null, y0 = 0, dx = 0, moved = false;
+    flip.ontouchstart = e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; moved = false; flip.style.transition = 'none'; };
+    flip.ontouchmove = e => {
+      if (x0 == null) return;
+      dx = e.touches[0].clientX - x0;
+      if (!moved && Math.abs(dx) < 8) return;
+      if (!moved && Math.abs(e.touches[0].clientY - y0) > Math.abs(dx)) { x0 = null; return; }
+      moved = true;
+      flip.style.transform = `translateX(${dx}px) rotate(${dx / 24}deg)`;
+      flip.style.setProperty('--yes', Math.max(0, Math.min(1, dx / 90)));
+      flip.style.setProperty('--no', Math.max(0, Math.min(1, -dx / 90)));
+    };
+    flip.ontouchend = () => {
+      if (x0 == null) return; x0 = null;
+      if (dx > 90) return answer(true);
+      if (dx < -90) return answer(false);
+      flip.style.transition = 'transform .2s'; flip.style.transform = ''; flip.style.setProperty('--yes', 0); flip.style.setProperty('--no', 0);
+      setTimeout(() => { moved = false; }, 0);
     };
   };
   draw();
@@ -552,23 +590,25 @@ function runQuiz(items, title, back, opts = {}) {
       const pct = Math.round(right / total * 100);
       app.innerHTML = `<div class="result">
         <div class="label">${opts.resultLabel || '本次得分'}</div>
-        <div class="score">${opts.srs ? right : pct}<span>${opts.srs ? `/ ${total}` : '分'}</span></div>
+        <div class="score" id="score">${opts.srs ? right : pct}<span>${opts.srs ? `/ ${total}` : '分'}</span></div>
         <p class="muted">${opts.srs ? `答對 ${right} 個${slow ? `，其中 ${slow} 個想得比較久，會提早再複習` : ''}` : `答對 ${right} / ${total}`}</p>
         ${wrongs.length ? `<div class="section-title">答錯的單詞</div><div class="wl">${wrongs.map(w => `<div class="wl-item"><span class="en">${esc(w.en)}</span><span class="zh">${esc(w.zh)}</span><button class="speak sm" data-say="${esc(w.en)}" aria-label="發音">${I.speak}</button></div>`).join('')}</div>` : ''}
         ${opts.onDone ? opts.onDone({ pct, right, total }) : `<div class="row"><a class="btn" href="${back}">完成</a></div>`}
       </div>`;
+      countUp($('#score'), opts.srs ? right : pct);
       return;
     }
     const q = queue[idx], it = q.it, isRetry = idx >= total;
     app.innerHTML = `
       <div class="fc-top"><span>${isRetry ? '再試一次' : `第 ${idx + 1} / ${total} 題`}</span><span>答對 ${right}</span></div>
       <div class="bar"><i style="width:${Math.min(idx, total) / total * 100}%"></i></div>
-      ${questionHtml(q)}`;
+      <div class="q-wrap">${questionHtml(q)}</div>`;
     const t0 = performance.now();
     if (q.type === 'e2z' || q.type === 'listen') speak(it.en);
     const finish = (ok, picked) => {
       const d = DICT[lc(it.en)];
       record(q, ok, performance.now() - t0, picked);
+      haptic(ok ? 'ok' : 'bad');
       if ($('#gap')) $('#gap').textContent = it.en;
       $('#fb').innerHTML = `<div class="feedback ${ok ? 'ok' : 'no'}"><div>${ok ? '答對了' : '正確答案'}：<b class="serif">${esc(it.en)}</b> ${esc(it.zh)}</div>
           ${!ok && picked && picked.en && q.type !== 'para' && picked.zh ? `<div class="small">你選的 <b class="serif">${esc(picked.en)}</b> 是「${esc(picked.zh)}」</div>` : ''}
@@ -583,7 +623,7 @@ function runQuiz(items, title, back, opts = {}) {
       app.querySelectorAll('.opt').forEach(b => b.onclick = () => {
         const o = q.opts[b.dataset.i];
         app.querySelectorAll('.opt').forEach(x => { x.disabled = true; if (q.opts[x.dataset.i].ok) x.classList.add('right'); });
-        if (!o.ok) b.classList.add('wrong');
+        if (!o.ok) { b.classList.add('wrong'); shake(b); }
         finish(!!o.ok, o.ok ? null : o);
       });
     } else {
@@ -591,7 +631,7 @@ function runQuiz(items, title, back, opts = {}) {
       const check = () => {
         if (inp.disabled || !inp.value.trim()) return;
         const ok = lc(inp.value.trim()) === lc(it.en);
-        inp.disabled = true; $('#spOk').remove(); inp.classList.add(ok ? 'right' : 'wrong');
+        inp.disabled = true; $('#spOk').remove(); inp.classList.add(ok ? 'right' : 'wrong'); if (!ok) shake(inp);
         finish(ok, null);
       };
       $('#spOk').onclick = check; inp.onkeydown = e => { if (e.key === 'Enter') check(); };
