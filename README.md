@@ -13,8 +13,8 @@
 ## 檔案
 - `index.html`、`style.css`、`app.js`：網頁本體，純靜態，不需建置。
 - `data/dict.json`：3,850 個單詞的例句（附中譯）、詞性、詞族、搭配、同義字、反義字、易混淆字和話題，由 Claude 依故事中的中文釋義產生。
-- `data/stories.json`：從 `雅思單詞/` 的學習版 PDF 和重點單詞.xlsx 解析出來的資料。
-- `tools/parse_stories.py`：重新產生資料的腳本，用法：`python3 tools/parse_stories.py 雅思單詞 data/stories.json`，需要 `pdftotext` 和 `openpyxl`。
+- `data/stories.json`：從原始故事資料夾（學習版 PDF 和重點單詞.xlsx，未放在 repo 裡）解析出來的資料。
+- `tools/parse_stories.py`：重新產生資料的腳本，用法：`python3 tools/parse_stories.py <故事資料夾> data/stories.json`，需要 `pdftotext` 和 `openpyxl`。
 
 ## 本機預覽
 ```
