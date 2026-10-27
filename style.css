@@ -354,5 +354,35 @@ a.note { color: var(--word); }
 .kv:first-child { padding-top: 0; }
 
 .toast { position: fixed; left: 50%; bottom: calc(var(--tab) + 20px); transform: translateX(-50%); z-index: 60; background: var(--text); color: var(--bg); padding: 10px 18px; font-size: 14px; white-space: nowrap; animation: fade .2s; }
+/* ---------- speaking practice, roots, dictation ---------- */
+.word .speak.mic, .say-row .mic { margin-left: 0; }
+.say-row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+.speak.mic.recording { color: #fff; background: var(--bad); border-color: var(--bad); box-shadow: 0 3px 0 #8a332b; }
+.speak.mic.recording .ic { animation: beat .9s ease-in-out infinite; }
+.speech-out:empty { display: none; }
+.speech-out { margin: 4px 0 12px; font-size: 13px; }
+.face .speech-out { margin: 10px 0 0; }
+.speech-res { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-left: 3px solid; animation: rise .2s ease-out; text-align: left; }
+.speech-res b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.speech-res small { flex-basis: 100%; color: var(--muted); }
+.speech-res.ok { color: var(--ok); background: var(--ok-soft); }
+.speech-res.mid { color: var(--word); background: var(--brand-soft); }
+.speech-res.no { color: var(--bad); background: var(--bad-soft); }
+.heard-words { font-family: Georgia, serif; font-size: 15px; line-height: 1.7; margin-top: 6px; }
+.heard-words .hit { color: var(--ok); }
+.heard-words .miss { color: var(--bad); text-decoration: underline wavy; text-underline-offset: 3px; }
+.roots { display: flex; flex-wrap: wrap; align-items: stretch; gap: 4px; margin-bottom: 6px; }
+.roots i { align-self: center; color: var(--muted); font-style: normal; font-size: 13px; }
+.root { display: flex; flex-direction: column; align-items: center; border: 1px solid var(--line); border-bottom: 2px solid var(--brand); padding: 3px 9px 2px; min-width: 44px; }
+.root b { font-family: Georgia, serif; font-size: 16px; color: var(--word); }
+.root small { font-size: 11px; color: var(--muted); }
+.memo { font-size: 14px; margin-bottom: 14px; }
+.face .roots { justify-content: center; margin-top: 12px; }
+.text-btn { display: block; margin: 14px auto 0; border: 0; background: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; padding: 6px 10px; }
+.text-btn:active { color: var(--text); }
+.q-stem .row .btn.listen { flex: 3; }
+.q-stem .row .btn.slow { flex: 1; min-width: 72px; color: var(--muted); }
+.dict-sent { font-family: Georgia, serif; font-size: 18px; font-weight: 400; line-height: 1.8; margin-top: 14px; }
+.dict-sent .gap { min-width: 4em; letter-spacing: -.1em; color: var(--muted); }
 @media (min-width: 760px) { main { padding: 24px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

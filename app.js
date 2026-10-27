@@ -31,7 +31,8 @@ function grade(k, result) {
   const today = dayNo();
   if (!S.srs[k]) S.newDay[dayKey()] = newToday() + 1;
   const r = S.srs[k] || { lv: 0, due: today };
-  if (result === 'bad') { r.lv = 0; r.due = today + 1; } // missed words are retried at the end of the round, then tomorrow
+  if (result === 'easy') { r.lv = 6; r.due = today + GAPS[6]; } // already familiar: skip ahead
+  else if (result === 'bad') { r.lv = 0; r.due = today + 1; } // missed words are retried at the end of the round, then tomorrow
   // only one level-up per day, so cramming the same word several times today doesn't inflate it
   else if (r.last === today && r.lv > 0) { r.due = Math.max(r.due, today + 1); }
   else if (result === 'slow') { r.lv = Math.max(1, r.lv); r.due = today + Math.max(1, Math.ceil(GAPS[r.lv] / 2)); }
@@ -121,6 +122,7 @@ const svg = (d, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hi
 const I = {
   speak: svg('<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>'),
   chev: svg('<path d="M9 5l7 7-7 7"/>'),
+  mic: svg('<rect x="9" y="3" width="6" height="11"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/>'),
   check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   star: svg('<path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 17l-5.4 3 1.2-6-4.5-4.2 6.1-.7z"/>'),
   starOn: svg('<path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 17l-5.4 3 1.2-6-4.5-4.2 6.1-.7z"/>', 'fill')
@@ -154,6 +156,61 @@ function speak(text, btn) {
 // short vibration where supported (Android); iOS Safari ignores it
 const haptic = kind => { try { navigator.vibrate && navigator.vibrate(kind === 'bad' ? [30, 50, 30] : kind === 'ok' ? 18 : 8); } catch (e) { /* unsupported */ } };
 function shake(el) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); }
+/* ---------- speaking practice: say it, get a score from the phone's speech recognition ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const micBtn = (text, cls = '') => `<button class="speak mic ${cls}" data-mic="${esc(text)}" aria-label="跟讀">${I.mic}</button>`;
+const words = s => lc(s).replace(/[^a-z' ]+/g, ' ').split(/\s+/).filter(Boolean);
+function editSim(a, b) {
+  const m = a.length, n = b.length; if (!m || !n) return 0;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return 1 - prev[n] / Math.max(m, n);
+}
+// score 0-100 against the best recognition alternative; for sentences, the share of words heard correctly
+function scoreSpeech(target, alts) {
+  const tw = words(target);
+  let best = { score: 0, heard: alts[0] || '', hit: [] };
+  for (const alt of alts) {
+    const aw = words(alt);
+    // different endings of the same word (look / looked) still count as heard
+    const hit = tw.map(t => aw.some(a => a === t || editSim(a, t) >= .8 || (Math.min(a.length, t.length) >= 3 && (a.startsWith(t) || t.startsWith(a)))));
+    const score = tw.length === 1
+      ? Math.round(Math.max(...aw.map(a => editSim(a, tw[0])), 0) * 100)
+      : Math.round(hit.filter(Boolean).length / tw.length * 100);
+    if (score > best.score) best = { score, heard: alt, hit };
+  }
+  return best;
+}
+let recognizer = null;
+function practiceSpeech(btn) {
+  const out = btn.closest('.sheet, .face, .ex, main').querySelector('.speech-out');
+  if (!SR) { if (out) out.innerHTML = '<span class="muted">這個瀏覽器不支援語音辨識。iPhone 請用 Safari 並開啟「設定 › Siri › 聽寫」。</span>'; return; }
+  if (recognizer) { recognizer.abort(); recognizer = null; }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  const target = btn.dataset.mic, rec = new SR();
+  rec.lang = voice ? voice.lang : S.accent; rec.interimResults = false; rec.maxAlternatives = 5;
+  recognizer = rec; btn.classList.add('recording');
+  if (out) out.innerHTML = '<span class="muted">請念出來…</span>';
+  let got = false;
+  rec.onresult = e => {
+    got = true;
+    const r = scoreSpeech(target, [...e.results[0]].map(a => a.transcript));
+    const tw = target.split(/\s+/);
+    const detail = tw.length > 1 ? `<div class="heard-words">${tw.map((w, i) => `<span class="${r.hit[i] ? 'hit' : 'miss'}">${esc(w)}</span>`).join(' ')}</div>` : '';
+    if (out) out.innerHTML = `<div class="speech-res ${r.score >= 85 ? 'ok' : r.score >= 60 ? 'mid' : 'no'}"><b>${r.score}</b><span>${r.score >= 85 ? '很好' : r.score >= 60 ? '接近了，再念一次' : '再試一次'}</span><small>聽到：${esc(r.heard)}</small></div>${detail}`;
+    haptic(r.score >= 85 ? 'ok' : 'tap');
+  };
+  rec.onerror = e => {
+    if (!out) return;
+    out.innerHTML = `<span class="muted">${e.error === 'not-allowed' || e.error === 'service-not-allowed' ? '需要允許使用麥克風和語音辨識' : e.error === 'no-speech' ? '沒有聽到聲音，再試一次' : '辨識失敗，再試一次'}</span>`;
+  };
+  rec.onend = () => { btn.classList.remove('recording'); if (recognizer === rec) recognizer = null; if (!got && out && /請念出來/.test(out.textContent)) out.innerHTML = '<span class="muted">沒有聽到聲音，再試一次</span>'; };
+  try { rec.start(); } catch (e) { btn.classList.remove('recording'); }
+}
 function countUp(el, to) {
   if (!el || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const t0 = performance.now(), dur = 600;
@@ -179,12 +236,14 @@ function confusables(k) {
   const mine = Object.keys(S.conf).filter(p => S.conf[p] >= 2 && p.split('|').includes(k)).map(p => p.split('|').find(x => x !== k));
   return [...new Set(mine.concat(fromDict))];
 }
+const rootsHtml = d => `<div class="roots">${d.parts.map(([p, m]) => `<span class="root"><b>${esc(p)}</b><small>${esc(m)}</small></span>`).join('<i>+</i>')}</div>${d.memo ? `<div class="memo">${esc(d.memo)}</div>` : ''}`;
 function dictHtml(k) {
   const d = DICT[k]; if (!d) return '';
   const conf = confusables(k);
   return `
+    ${d.parts && d.parts.length ? `<div class="sec">詞根拆解</div>${rootsHtml(d)}` : ''}
     ${d.ex ? `<div class="sec">例句</div>
-    <div class="ex"><div class="ex-en"><span>${esc(d.ex)}</span><button class="speak sm" data-say="${esc(d.ex)}" aria-label="朗讀例句">${I.speak}</button></div><div class="ex-zh">${esc(d.exZh)}</div></div>` : ''}
+    <div class="ex"><div class="ex-en"><span>${esc(d.ex)}</span><button class="speak sm" data-say="${esc(d.ex)}" aria-label="朗讀例句">${I.speak}</button>${micBtn(d.ex, 'sm')}</div><div class="ex-zh">${esc(d.exZh)}</div><div class="speech-out"></div></div>` : ''}
     ${d.col && d.col.length ? `<div class="sec">常用搭配</div><ul class="col">${d.col.map(([e, z]) => `<li><span class="en">${esc(e)}</span><span class="muted">${esc(z)}</span></li>`).join('')}</ul>` : ''}
     ${d.fam && d.fam.length ? `<div class="sr"><span class="sec">詞族</span><div class="tags">${d.fam.map(([w, p, z]) => `<span class="tag">${esc(w)} <i>${esc(p)}</i> <small>${esc(z)}</small></span>`).join('')}</div></div>` : ''}
     ${d.syn && d.syn.length ? `<div class="sr"><span class="sec">同義</span><div class="tags">${d.syn.map(wordLink).join('')}</div></div>` : ''}
@@ -200,7 +259,8 @@ function openSheet(en, opts = {}) {
   const meanings = [...new Set(uses.map(u => u.zh))];
   const sh = $('#sheet');
   sh.innerHTML = `
-    <div class="word"><span>${esc(w ? w.en : en)}</span>${posOf(k) ? `<span class="pos">${esc(posOf(k))}</span>` : ''}<button class="speak" data-say="${esc(en)}" aria-label="發音">${I.speak}</button></div>
+    <div class="word"><span>${esc(w ? w.en : en)}</span>${posOf(k) ? `<span class="pos">${esc(posOf(k))}</span>` : ''}<button class="speak" data-say="${esc(en)}" aria-label="發音">${I.speak}</button>${micBtn(w ? w.en : en)}</div>
+    <div class="speech-out"></div>
     <div class="mean">${esc(zh)}${meanings.length > 1 ? `<div class="small muted">其他釋義：${esc(meanings.filter(m => m !== zh).join('；'))}</div>` : ''}</div>
     ${use.ctx ? `<div class="sec">故事原句</div><div class="ctx">${ctxHtml(use.ctx)}</div>` : ''}
     ${dictHtml(k)}
@@ -222,7 +282,13 @@ function openSheet(en, opts = {}) {
 }
 function closeSheet() { $('#sheet').hidden = true; $('#sheetMask').hidden = true; }
 $('#sheetMask').onclick = closeSheet;
-document.addEventListener('click', e => { const b = e.target.closest('[data-say]'); if (b) { e.stopPropagation(); speak(b.dataset.say, b); } });
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-say], [data-say-slow], [data-mic]'); if (!b) return;
+  e.stopPropagation();
+  if (b.dataset.mic) return practiceSpeech(b);
+  if (b.dataset.saySlow) { const r = S.rate; S.rate = Math.min(r, .7); speak(b.dataset.saySlow, b); S.rate = r; return; }
+  speak(b.dataset.say, b);
+});
 
 /* ================= 今日 ================= */
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
@@ -428,32 +494,35 @@ function viewCards(items, title, back, opts = {}) {
       <div class="bar"><i style="width:${idx / deck.length * 100}%"></i></div>
       <div class="flip enter" id="flip"><span class="stamp yes">記得</span><span class="stamp no">忘了</span><div class="flip-in">
         <div class="face"><div class="big">${esc(it.en)}</div>${posOf(k) ? `<div class="pos">${esc(posOf(k))}</div>` : ''}
-          <button class="speak" style="margin-top:14px" data-say="${esc(it.en)}" aria-label="發音">${I.speak}</button>
+          <div class="say-row"><button class="speak" data-say="${esc(it.en)}" aria-label="發音">${I.speak}</button>${micBtn(it.en)}</div><div class="speech-out"></div>
           ${it.ctx ? `<div class="ctx">${esc(it.ctx.before)} <b>${esc(it.en)}</b> ${esc(it.ctx.after)}</div>` : ''}
           <div class="hint">先在心裡說出中文，再點擊翻面</div></div>
         <div class="face back"><div class="zh">${esc(it.zh)}</div><div class="big sm">${esc(it.en)}</div>
+          ${d && d.parts && d.parts.length ? rootsHtml(d) : ''}
           ${d && d.ex ? `<div class="ctx"><span class="ex-en">${esc(d.ex)}</span><br>${esc(d.exZh)}</div>` : ''}
           ${d && d.col && d.col.length ? `<div class="ctx">搭配：${esc(d.col.map(c => c[0]).join(' · '))}</div>` : ''}
           ${d && d.syn && d.syn.length ? `<div class="ctx">同義：${esc(d.syn.join(', '))}${d.ant.length ? `　反義：${esc(d.ant.join(', '))}` : ''}</div>` : ''}</div>
       </div></div>
-      <div class="row fc-btns"><button class="btn no" id="no">忘了</button><button class="btn yes" id="yes">記得</button></div>`;
+      <div class="row fc-btns"><button class="btn no" id="no">忘了</button><button class="btn yes" id="yes">記得</button></div>
+      <button class="text-btn" id="easy">太簡單，以後不用再背</button>`;
     speak(it.en);
     const flip = $('#flip');
     let busy = false;
     // the card flies off to the side it was answered with, then the next one comes in
-    const answer = ok => {
+    const answer = (ok, easy) => {
       if (busy) return; busy = true;
       haptic(ok ? 'ok' : 'tap');
-      grade(k, ok ? 'ok' : 'bad'); save();
+      grade(k, easy ? 'easy' : ok ? 'ok' : 'bad'); save();
       if (ok) yes++; else again.push(it);
       flip.style.transition = 'transform .28s ease-in, opacity .28s';
-      flip.style.transform = `translateX(${ok ? 120 : -120}%) rotate(${ok ? 12 : -12}deg)`;
+      flip.style.transform = easy ? 'translateY(-60%) scale(.9)' : `translateX(${ok ? 120 : -120}%) rotate(${ok ? 12 : -12}deg)`;
       flip.style.opacity = '0';
       setTimeout(() => { idx++; draw(); }, 240);
     };
-    flip.onclick = e => { if (!moved && !e.target.closest('[data-say]')) flip.classList.toggle('on'); };
+    flip.onclick = e => { if (!moved && !e.target.closest('[data-say], [data-mic]')) flip.classList.toggle('on'); };
     $('#yes').onclick = () => answer(true);
     $('#no').onclick = () => answer(false);
+    $('#easy').onclick = () => answer(true, true);
     // drag: the card follows the finger; past the threshold it counts as an answer
     let x0 = null, y0 = 0, dx = 0, moved = false;
     flip.ontouchstart = e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; moved = false; flip.style.transition = 'none'; };
@@ -481,11 +550,11 @@ function viewCards(items, title, back, opts = {}) {
 /* ================= questions ================= */
 const QTYPES = {
   e2z: '看英文選中文', z2e: '看中文選英文', para: '同義替換', para2: '找出同義字',
-  cloze: '故事填空', spell: '拼寫單詞', listen: '聽音拼字'
+  cloze: '故事填空', spell: '拼寫單詞', listen: '聽音拼字', dict: '例句聽寫'
 };
-const CAT = { e2z: 'meaning', z2e: 'meaning', para: 'para', para2: 'para', cloze: 'usage', spell: 'spell', listen: 'listen' };
-const CAT_NAME = { meaning: '意思辨識', para: '同義替換', usage: '用法填空', spell: '拼寫', listen: '聽音拼字' };
-const CAT_TYPE = { meaning: 'z2e', para: 'para', usage: 'cloze', spell: 'spell', listen: 'listen' };
+const CAT = { e2z: 'meaning', z2e: 'meaning', para: 'para', para2: 'para', cloze: 'usage', spell: 'spell', listen: 'listen', dict: 'listen' };
+const CAT_NAME = { meaning: '意思辨識', para: '同義替換', usage: '用法填空', spell: '拼寫', listen: '聽寫' };
+const CAT_TYPE = { meaning: 'z2e', para: 'para', usage: 'cloze', spell: 'spell', listen: 'dict' };
 const kindOf = it => posOf(lc(it.en)) || (/的$/.test(it.zh) ? 'adj.' : /地$/.test(it.zh) ? 'adv.' : 'x');
 let KIND_POOL = null;
 function poolOf(kind) {
@@ -494,14 +563,22 @@ function poolOf(kind) {
 }
 const synOf = it => { const d = DICT[lc(it.en)]; return d && d.syn ? d.syn.filter(s => !/\s/.test(s) || s.split(' ').length <= 2) : []; };
 const exHas = it => { const d = DICT[lc(it.en)]; return d && d.ex && lc(d.ex).includes(lc(it.en).slice(0, Math.max(3, it.en.length - 3))); };
+// the word as it appears in its example sentence (it may be inflected, e.g. froze for freeze)
+function exForm(it) {
+  const d = DICT[lc(it.en)]; if (!d || !d.ex) return null;
+  if (/\s/.test(it.en)) return lc(d.ex).includes(lc(it.en)) ? d.ex.substr(lc(d.ex).indexOf(lc(it.en)), it.en.length) : null;
+  const m = d.ex.match(new RegExp('\\b' + it.en.slice(0, Math.max(3, it.en.length - 3)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "[a-z']*", 'i'));
+  return m ? m[0] : null;
+}
 function canDo(type, it) {
+  if (type === 'dict') return !!exForm(it);
   if (type === 'cloze') return !!it.ctx;
   if (type === 'para') return synOf(it).length > 0 && exHas(it);
   if (type === 'para2') return synOf(it).length > 0;
   if (type === 'spell' || type === 'listen') return !/\s/.test(it.en) && it.en.length <= 14;
   return true;
 }
-const FALLBACK = { para: ['cloze', 'z2e'], para2: ['z2e'], cloze: ['para2', 'z2e'], listen: ['spell', 'e2z'], spell: ['e2z'], z2e: [], e2z: [] };
+const FALLBACK = { dict: ['listen', 'spell', 'e2z'], para: ['cloze', 'z2e'], para2: ['z2e'], cloze: ['para2', 'z2e'], listen: ['spell', 'e2z'], spell: ['e2z'], z2e: [], e2z: [] };
 const fitType = (type, it) => canDo(type, it) ? type : FALLBACK[type].find(t => canDo(t, it)) || 'e2z';
 
 function optionsFor(it, pick, n = 4) {
@@ -523,6 +600,7 @@ function makeQuestion(it, type) {
     const banned = new Set(synOf(it).map(lc));
     q.opts = optionsFor(it, o => !banned.has(lc(o.en))).map(o => ({ en: o.en, zh: o.zh, ok: o === it }));
   }
+  if (type === 'dict') q.answer = exForm(it);
   if (type === 'para') {
     const right = shuffle(synOf(it))[0], banned = new Set(synOf(it).map(lc).concat(lc(it.en)));
     const wrong = [];
@@ -547,7 +625,12 @@ function questionHtml(q) {
     stem = `<div class="q-stem sent en-sent">${esc(d.ex).replace(re, '<b>$1</b>')}<div class="hint-line">哪個字可以替換粗體字，意思不變？</div></div>`;
   } else if (q.type === 'para2') stem = `<div class="q-stem"><div class="en">${esc(q.syn)}</div><div class="hint-line">哪個單詞和它意思最接近？</div></div>`;
   else if (q.type === 'spell') stem = `<div class="q-stem">${esc(it.zh)}<div class="hint-line">首字母 <b class="serif">${esc(it.en[0])}</b>，共 ${it.en.length} 個字母</div></div>`;
-  else stem = `<div class="q-stem"><button class="btn ghost listen" data-say="${esc(it.en)}">${I.speak} 再聽一次</button><div class="hint-line">聽發音，拼出單詞</div></div>`;
+  else if (q.type === 'dict') {
+    const i0 = d.ex.indexOf(q.answer);
+    stem = `<div class="q-stem"><div class="row"><button class="btn ghost listen" data-say="${esc(d.ex)}">${I.speak} 播放例句</button><button class="btn ghost listen slow" data-say-slow="${esc(d.ex)}">慢速</button></div>
+      <div class="dict-sent">${esc(d.ex.slice(0, i0))}<span class="gap" id="gap">${'＿'.repeat(Math.min(8, q.answer.length))}</span>${esc(d.ex.slice(i0 + q.answer.length))}</div>
+      <div class="hint-line">聽例句，拼出空格裡的字（${q.answer.length} 個字母）</div></div>`;
+  } else stem = `<div class="q-stem"><button class="btn ghost listen" data-say="${esc(it.en)}">${I.speak} 再聽一次</button><div class="hint-line">聽發音，拼出單詞</div></div>`;
   const body = q.opts
     ? `<div class="opts">${q.opts.map((o, i) => `<button class="opt ${q.type === 'e2z' ? '' : 'en'}" data-i="${i}">${esc(q.type === 'e2z' ? o.zh : o.en)}</button>`).join('')}</div>`
     : `<input class="spell" id="sp" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="輸入英文單詞"><button class="btn block" id="spOk">確定</button>`;
@@ -605,11 +688,12 @@ function runQuiz(items, title, back, opts = {}) {
       <div class="q-wrap">${questionHtml(q)}</div>`;
     const t0 = performance.now();
     if (q.type === 'e2z' || q.type === 'listen') speak(it.en);
+    if (q.type === 'dict') speak(DICT[lc(it.en)].ex, $('.listen'));
     const finish = (ok, picked) => {
       const d = DICT[lc(it.en)];
       record(q, ok, performance.now() - t0, picked);
       haptic(ok ? 'ok' : 'bad');
-      if ($('#gap')) $('#gap').textContent = it.en;
+      if ($('#gap')) $('#gap').textContent = q.answer || it.en;
       $('#fb').innerHTML = `<div class="feedback ${ok ? 'ok' : 'no'}"><div>${ok ? '答對了' : '正確答案'}：<b class="serif">${esc(it.en)}</b> ${esc(it.zh)}</div>
           ${!ok && picked && picked.en && q.type !== 'para' && picked.zh ? `<div class="small">你選的 <b class="serif">${esc(picked.en)}</b> 是「${esc(picked.zh)}」</div>` : ''}
           ${q.type === 'para' && d ? `<div class="small">${esc(it.en)} 的同義字：${esc(d.syn.join(', '))}</div>` : ''}</div>
@@ -630,7 +714,7 @@ function runQuiz(items, title, back, opts = {}) {
       const inp = $('#sp'); inp.focus();
       const check = () => {
         if (inp.disabled || !inp.value.trim()) return;
-        const ok = lc(inp.value.trim()) === lc(it.en);
+        const v = lc(inp.value.trim()), ok = v === lc(it.en) || (q.answer && v === lc(q.answer));
         inp.disabled = true; $('#spOk').remove(); inp.classList.add(ok ? 'right' : 'wrong'); if (!ok) shake(inp);
         finish(ok, null);
       };
@@ -646,7 +730,7 @@ function reviewType(it, i) {
   if (r.lv <= 1) return 'e2z';
   if (r.lv === 2) return i % 2 ? 'para2' : 'z2e';
   if (r.lv === 3) return i % 2 ? 'para' : 'cloze';
-  return i % 2 ? 'listen' : 'spell';
+  return ['spell', 'dict', 'listen'][i % 3];
 }
 function viewReview() {
   const keys = dueKeys().sort((a, b) => S.srs[a].lv - S.srs[b].lv || S.srs[a].due - S.srs[b].due);
@@ -676,7 +760,7 @@ function viewParaQuiz(id) {
     }
   });
 }
-const PARA_TYPES = ['e2z', 'para2', 'cloze', 'z2e', 'para', 'spell'];
+const PARA_TYPES = ['e2z', 'para2', 'cloze', 'z2e', 'para', 'spell', 'dict'];
 
 /* ================= 單詞 ================= */
 let wordFilter = 'all', wordQuery = '', wordTopic = '', wordLimit = 80;
@@ -804,7 +888,7 @@ function viewMe() {
     </div>
     <div class="section-title">進度</div>
     <div class="card">
-      <p class="small muted" style="margin:0 0 12px">進度只存在這支手機的瀏覽器裡，換手機前請先匯出。</p>
+      <p class="small muted" style="margin:0 0 12px">進度只存在這支手機的瀏覽器裡，換手機前請先匯出。加到主畫面（Safari 分享鈕 › 加入主畫面）後可以像 App 一樣全螢幕開啟，沒有網路也能用。</p>
       <div class="row"><button class="btn ghost" id="exp">匯出進度</button><button class="btn ghost" id="imp">匯入進度</button></div>
     </div>
     <div class="more"><button class="btn ghost danger" id="reset">重置所有進度</button></div>`;
@@ -898,4 +982,5 @@ Promise.all([
   fetch(`data/dict.json?v=${VER}`).then(r => r.json()).catch(() => ({}))
 ])
   .then(([d, dict]) => { DICT = dict; prepare(d); addEventListener('hashchange', route); route(); })
+  .then(() => { if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {}); })
   .catch(() => { app.innerHTML = '<div class="empty">資料載入失敗，請重新整理</div>'; });
