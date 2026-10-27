@@ -554,7 +554,7 @@ function viewMe() {
       <div class="kv"><span>聲音</span><select class="select" id="voiceSel"></select></div>
       <div class="kv"><span>語速</span><span class="chips">${[[0.7, '慢'], [0.9, '標準'], [1.1, '快']].map(([k, t]) => `<button class="chip ${S.rate === k ? 'on' : ''}" data-rate="${k}">${t}</button>`).join('')}</span></div>
       <div class="kv"><span>試聽</span><button class="speak" data-say="The weather forecast predicts a substantial amount of rain." aria-label="試聽">${I.speak}</button></div>
-      <p class="small muted" style="margin:8px 0 0">聲音來自手機內建語音。iPhone 可到「設定 › 輔助使用 › 朗讀內容 › 聲音 › 英文」下載「加強版／高品質」聲音，下載後回這裡選擇，會自然很多。</p>
+      <p class="small muted" style="margin:8px 0 0"><span id="voiceCount"></span>。聲音來自手機內建語音。iPhone 可到「設定 › 輔助使用 › 朗讀內容 › 聲音 › 英文」下載「加強版／高品質」聲音，下載後要把瀏覽器完全關掉（從多工畫面滑掉）再打開，新聲音才會出現在清單裡。</p>
     </div>
     <div class="section-title">其他</div>
     <div class="card">
@@ -584,11 +584,14 @@ function viewMe() {
 
 function fillVoiceSelect() {
   const sel = $('#voiceSel'); if (!sel) return;
-  const vs = accentVoices().sort((a, b) => voiceRank(a) - voiceRank(b) || a.name.localeCompare(b.name));
-  const list = vs.length ? vs : enVoices();
-  sel.innerHTML = list.length
-    ? list.map(v => `<option value="${esc(v.name)}" ${voice && v.name === voice.name ? 'selected' : ''}>${esc(v.name.replace(/\s*\(.*\)$/, ''))}${voiceRank(v) === 0 ? '（高品質）' : ''}</option>`).join('')
+  const sort = l => l.sort((a, b) => voiceRank(a) - voiceRank(b) || a.name.localeCompare(b.name));
+  const mine = sort(accentVoices()), rest = sort(enVoices().filter(v => !mine.includes(v)));
+  const opt = v => `<option value="${esc(v.name)}" ${voice && v.name === voice.name ? 'selected' : ''}>${esc(v.name)}${rest.includes(v) ? ' · ' + esc(v.lang) : ''}</option>`;
+  // list every English voice the browser exposes; some phones tag voices with an unexpected accent
+  sel.innerHTML = mine.length || rest.length
+    ? `<optgroup label="${S.accent === 'en-US' ? '美式' : '英式'}">${mine.map(opt).join('')}</optgroup>${rest.length ? `<optgroup label="其他英文聲音">${rest.map(opt).join('')}</optgroup>` : ''}`
     : '<option>找不到英文語音</option>';
+  const n = $('#voiceCount'); if (n) n.textContent = `瀏覽器提供 ${enVoices().length} 個英文聲音`;
 }
 
 /* ================= theme & router ================= */
