@@ -69,6 +69,14 @@ const ctxHtml = c => c ? esc(c.before) + ' <b>' + esc(c.word) + '</b> ' + esc(c.
 /* ================= helpers ================= */
 const $ = s => document.querySelector(s);
 const app = $('#app');
+const svg = (d, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const I = {
+  speak: svg('<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>'),
+  chev: svg('<path d="M9 5l7 7-7 7"/>'),
+  star: svg('<path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 17l-5.4 3 1.2-6-4.5-4.2 6.1-.7z"/>'),
+  starOn: svg('<path d="M12 3.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 17l-5.4 3 1.2-6-4.5-4.2 6.1-.7z"/>', 'fill')
+};
+const starBtn = (on, attr = '') => `<button class="star ${on ? 'on' : ''}" ${attr} aria-label="生詞本">${on ? I.starOn : I.star}</button>`;
 const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), 1600); }
 
@@ -86,11 +94,6 @@ function speak(text) {
   speechSynthesis.speak(u);
 }
 
-function ring(pct) {
-  const r = 18, c = 2 * Math.PI * r;
-  return `<svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="3"/>` +
-    `<circle cx="20" cy="20" r="${r}" fill="none" stroke="var(--brand)" stroke-width="3" stroke-linecap="round" stroke-dasharray="${c * pct} ${c}"/></svg>`;
-}
 const storyKnown = st => st.items.filter(it => S.known[lc(it.en)]).length;
 
 function setTop(title, back) {
@@ -112,13 +115,13 @@ function openSheet(en, opts = {}) {
   const meanings = [...new Set(uses.map(u => u.zh))];
   const sh = $('#sheet');
   sh.innerHTML = `<div class="grip"></div>
-    <div class="word"><span>${esc(w ? w.en : en)}</span><button class="speak" data-say="${esc(en)}">🔊</button></div>
+    <div class="word"><span>${esc(w ? w.en : en)}</span><button class="speak" data-say="${esc(en)}" aria-label="發音">${I.speak}</button></div>
     <div class="mean">${esc(zh)}${meanings.length > 1 ? `<div class="small muted">其他釋義：${esc(meanings.filter(m => m !== zh).join('；'))}</div>` : ''}</div>
     ${use.ctx ? `<div class="ctx">${ctxHtml(use.ctx)}</div>` : ''}
     ${others.length ? `<div class="from">也出現在：${others.map(id => `<a href="#/s/${id}?w=${encodeURIComponent(k)}">${id}. ${esc(BY_ID[id].title)}</a>`).join('、')}</div>` : ''}
     <div class="row">
-      <button class="btn ghost" id="shStar">${S.star[k] ? '★ 已加入生詞本' : '☆ 加入生詞本'}</button>
-      <button class="btn ${S.known[k] ? 'ghost' : ''}" id="shKnown">${S.known[k] ? '✓ 已掌握' : '標記已掌握'}</button>
+      <button class="btn ghost" id="shStar">${S.star[k] ? '已在生詞本' : '加入生詞本'}</button>
+      <button class="btn ${S.known[k] ? 'ghost' : ''}" id="shKnown">${S.known[k] ? '已掌握' : '標記已掌握'}</button>
     </div>`;
   sh.hidden = false; $('#sheetMask').hidden = false;
   speak(en);
@@ -150,7 +153,7 @@ function viewHome() {
         <div class="stat"><b>${streak()}</b><span>連續天數</span></div>
       </div>
     </section>
-    ${last ? `<a class="card continue" href="#/s/${last.id}"><div class="num">${last.id}</div><div class="t"><div class="small muted">繼續學習</div><div>${esc(last.title)}</div></div><span class="arrow">›</span></a>` : ''}
+    ${last ? `<a class="card continue" href="#/s/${last.id}"><div class="num">${last.id}<i style="width:${storyKnown(last) / last.items.length * 100}%"></i></div><div class="t"><div class="small muted">繼續學習</div><div>${esc(last.title)}</div></div><span class="arrow">${I.chev}</span></a>` : ''}
     <div class="section-title">全部故事</div>
     <input class="search" id="q" type="search" placeholder="搜尋故事標題或單詞…" value="${esc(homeQuery)}">
     <div class="chips" style="margin:10px 0 12px">
@@ -165,12 +168,12 @@ function viewHome() {
     $('#list').innerHTML = list.length ? list.map(st => {
       const k = storyKnown(st), pct = k / st.items.length;
       return `<a class="card story-item" href="#/s/${st.id}">
-        <div class="num">${ring(pct)}<span>${st.id}</span></div>
+        <div class="num">${st.id}<i style="width:${pct * 100}%"></i></div>
         <div class="info"><div class="title">${esc(st.title)}</div>
           <div class="meta"><span>${st.items.length} 詞</span><span>已掌握 ${k}</span>
             ${S.read[st.id] ? '<span class="badge">已讀</span>' : ''}${S.best[st.id] != null ? `<span class="badge gold">測驗 ${S.best[st.id]}%</span>` : ''}</div></div>
-        <span class="arrow">›</span></a>`;
-    }).join('') : '<div class="empty"><b>🔍</b>沒有符合的故事</div>';
+        <span class="arrow">${I.chev}</span></a>`;
+    }).join('') : '<div class="empty">沒有符合的故事</div>';
   };
   draw();
   $('#q').oninput = e => { homeQuery = e.target.value; draw(); };
@@ -206,15 +209,15 @@ function viewStory(id, focusWord) {
       </div>
     </div>
     <article class="story" id="story">${st.paras.map(paraHtml).join('')}</article>
-    <button class="btn ${S.read[id] ? 'ghost' : ''} block" id="doneBtn">${S.read[id] ? '✓ 已讀完（再按一次取消）' : '讀完了，打卡 ✓'}</button>
+    <button class="btn ${S.read[id] ? 'ghost' : ''} block" id="doneBtn">${S.read[id] ? '已讀完（再按一次取消）' : '讀完了，打卡'}</button>
     <div class="pager">
-      ${prev ? `<a href="#/s/${prev.id}">‹ ${prev.id}. ${esc(prev.title)}</a>` : '<span></span>'}
-      ${next ? `<a href="#/s/${next.id}">${next.id}. ${esc(next.title)} ›</a>` : '<span></span>'}
+      ${prev ? `<a href="#/s/${prev.id}"><div class="small">上一篇</div>${prev.id}. ${esc(prev.title)}</a>` : '<span></span>'}
+      ${next ? `<a href="#/s/${next.id}"><div class="small">下一篇</div>${next.id}. ${esc(next.title)}</a>` : '<span></span>'}
     </div>
     <div class="reader-actions">
-      <a class="btn ghost" href="#/s/${id}/list">📋 單詞表</a>
-      <a class="btn ghost" href="#/s/${id}/cards">🃏 單詞卡</a>
-      <a class="btn" href="#/s/${id}/quiz">✍️ 測驗</a>
+      <a class="btn ghost" href="#/s/${id}/list">單詞表</a>
+      <a class="btn ghost" href="#/s/${id}/cards">單詞卡</a>
+      <a class="btn" href="#/s/${id}/quiz">測驗</a>
     </div>`;
   document.documentElement.style.setProperty('--font', S.font + 'px');
   app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => { S.mode = b.dataset.m; save(); keepScroll(() => viewStory(id)); });
@@ -222,7 +225,7 @@ function viewStory(id, focusWord) {
   $('#fsDown').onclick = () => { S.font = Math.max(14, S.font - 1); save(); document.documentElement.style.setProperty('--font', S.font + 'px'); };
   if ($('#revealAll')) $('#revealAll').onclick = () => app.querySelectorAll('.w').forEach(w => w.classList.add('show'));
   $('#doneBtn').onclick = () => {
-    if (S.read[id]) delete S.read[id]; else { S.read[id] = Date.now(); touchDay(); toast('打卡成功！👑'); }
+    if (S.read[id]) delete S.read[id]; else { S.read[id] = Date.now(); touchDay(); toast('已打卡'); }
     save(); keepScroll(() => viewStory(id));
   };
   $('#story').onclick = e => {
@@ -245,13 +248,13 @@ function viewStoryList(id) {
     app.innerHTML = `
       <div class="row" style="margin-bottom:12px">
         <button class="btn ghost" id="hz">${hide ? '顯示中文' : '遮住中文'}</button>
-        <a class="btn" href="#/s/${id}/cards">🃏 單詞卡</a>
+        <a class="btn" href="#/s/${id}/cards">單詞卡</a>
       </div>
       <div class="wl">${st.items.map((it, i) => {
         const k = lc(it.en);
         return `<div class="card wl-item" data-i="${i}"><span class="muted small" style="width:22px">${i + 1}</span>
           <span class="en">${esc(it.en)}</span><span class="zh">${hide ? '••••' : esc(it.zh)}</span>
-          ${S.known[k] ? '<span class="badge">已掌握</span>' : ''}<button class="star" data-k="${esc(k)}">${S.star[k] ? '★' : '☆'}</button></div>`;
+          ${S.known[k] ? '<span class="badge">已掌握</span>' : ''}${starBtn(S.star[k])}</div>`;
       }).join('')}</div>`;
     $('#hz').onclick = () => { hide = !hide; keepScroll(draw); };
     app.querySelectorAll('.wl-item').forEach(el => el.onclick = e => {
@@ -284,11 +287,11 @@ function viewCards(items, title, back, onFinish) {
       <div class="fc-top"><span>${idx + 1} / ${deck.length}</span><span>認識 ${yes}</span></div>
       <div class="bar"><i style="width:${idx / deck.length * 100}%"></i></div>
       <div class="flip" id="flip"><div class="flip-in">
-        <div class="face"><div class="big">${esc(it.en)}</div><button class="speak" style="margin-top:16px" data-say="${esc(it.en)}">🔊</button><div class="hint">點擊翻面</div></div>
+        <div class="face"><div class="big">${esc(it.en)}</div><button class="speak" style="margin-top:16px" data-say="${esc(it.en)}" aria-label="發音">${I.speak}</button><div class="hint">點擊翻面</div></div>
         <div class="face back"><div class="zh">${esc(it.zh)}</div><div class="big" style="font-size:22px;margin-top:6px">${esc(it.en)}</div>
           ${it.ctx ? `<div class="ctx">${ctxHtml(it.ctx)}</div>` : ''}<div class="hint">${BY_ID[it.sid] ? it.sid + '. ' + esc(BY_ID[it.sid].title) : ''}</div></div>
       </div></div>
-      <div class="row fc-btns"><button class="btn no" id="no">✗ 不認識</button><button class="btn yes" id="yes">✓ 認識</button></div>`;
+      <div class="row fc-btns"><button class="btn no" id="no">不認識</button><button class="btn yes" id="yes">認識</button></div>`;
     speak(it.en);
     const flip = $('#flip');
     flip.onclick = e => { if (!e.target.closest('[data-say]')) flip.classList.toggle('on'); };
@@ -328,7 +331,7 @@ function makeQuiz(items, n) {
 }
 function viewQuiz(items, title, back, opts = {}) {
   setTop(title, back); setTab(null);
-  if (!items.length) { app.innerHTML = '<div class="empty"><b>🎉</b>沒有需要測驗的單詞</div>'; return; }
+  if (!items.length) { app.innerHTML = '<div class="empty">沒有需要測驗的單詞</div>'; return; }
   const qs = makeQuiz(items, opts.n || 15);
   let idx = 0, score = 0; const wrongs = [];
   const record = (it, ok) => {
@@ -349,17 +352,17 @@ function viewQuiz(items, title, back, opts = {}) {
       if (opts.sid) S.best[opts.sid] = Math.max(S.best[opts.sid] || 0, pct);
       touchDay();
       app.innerHTML = `<div class="card result">
-        <div class="crown">${pct >= 90 ? '👑' : pct >= 70 ? '🥂' : pct >= 50 ? '💪' : '📖'}</div>
+        <div class="label">本次得分</div>
         <div class="score">${pct}<span style="font-size:24px">分</span></div>
         <p class="muted">答對 ${score} / ${qs.length}　${pct >= 90 ? '總裁對你刮目相看！' : pct >= 70 ? '表現不錯，繼續加油' : '多讀幾遍故事再來挑戰'}</p>
-        ${wrongs.length ? `<div class="wrong-list"><div class="section-title">答錯的單詞（已加入錯題本）</div><div class="wl">${wrongs.map(w => `<div class="card wl-item"><span class="en">${esc(w.en)}</span><span class="zh">${esc(w.zh)}</span><button class="speak" data-say="${esc(w.en)}">🔊</button></div>`).join('')}</div></div>` : ''}
+        ${wrongs.length ? `<div class="wrong-list"><div class="section-title">答錯的單詞（已加入錯題本）</div><div class="wl">${wrongs.map(w => `<div class="card wl-item"><span class="en">${esc(w.en)}</span><span class="zh">${esc(w.zh)}</span><button class="speak" data-say="${esc(w.en)}" aria-label="發音">${I.speak}</button></div>`).join('')}</div></div>` : ''}
         <div class="row" style="margin-top:18px"><button class="btn ghost" id="retry">再測一次</button><a class="btn" href="${back}">完成</a></div></div>`;
       $('#retry').onclick = () => viewQuiz(opts.mistakes ? mistakeItems() : items, title, back, opts);
       return;
     }
     const q = qs[idx], it = q.it;
     let stem = '';
-    if (q.type === 'e2z') stem = `<div class="q-stem"><div class="en">${esc(it.en)}<button class="speak" data-say="${esc(it.en)}">🔊</button></div></div>`;
+    if (q.type === 'e2z') stem = `<div class="q-stem"><div class="en">${esc(it.en)}<button class="speak" data-say="${esc(it.en)}" aria-label="發音">${I.speak}</button></div></div>`;
     else if (q.type === 'z2e') stem = `<div class="q-stem">${esc(it.zh)}</div>`;
     else if (q.type === 'cloze') stem = `<div class="q-stem sent">${esc(it.ctx.before)} <span class="gap" id="gap">　</span> ${esc(it.ctx.after)}<div class="small muted" style="margin-top:6px">提示：${esc(it.zh)}</div></div>`;
     else stem = `<div class="q-stem">${esc(it.zh)}<div class="small muted" style="font-weight:400;margin-top:4px">首字母 <b style="font-family:Georgia">${esc(it.en[0])}</b>，共 ${it.en.length} 個字元</div></div>`;
@@ -374,8 +377,8 @@ function viewQuiz(items, title, back, opts = {}) {
       <div id="fb"></div>`;
     if (q.type === 'e2z') speak(it.en);
     const next = ok => {
-      $('#fb').innerHTML = `<div class="feedback ${ok ? 'ok' : 'no'}">${ok ? '✓ 答對了！' : '✗ 正確答案：'} <b>${esc(it.en)}</b> ${esc(it.zh)}</div>
-        <button class="btn block" style="margin-top:12px" id="nx">${idx + 1 < qs.length ? '下一題 →' : '看結果'}</button>`;
+      $('#fb').innerHTML = `<div class="feedback ${ok ? 'ok' : 'no'}">${ok ? '答對了：' : '正確答案：'} <b>${esc(it.en)}</b> ${esc(it.zh)}</div>
+        <button class="btn block" style="margin-top:12px" id="nx">${idx + 1 < qs.length ? '下一題' : '看結果'}</button>`;
       $('#nx').onclick = () => { idx++; draw(); scrollTo(0, 0); };
       const at = idx;
       if (ok) setTimeout(() => { if (idx === at && $('#nx')) $('#nx').click(); }, 900);
@@ -414,7 +417,7 @@ function viewWords() {
     <div class="chips" style="margin:10px 0 12px">
       ${[['all', `全部 ${WORDS.length}`], ['star', `生詞本 ${starN}`], ['known', `已掌握 ${knownN}`], ['new', '未掌握']].map(([k, t]) => `<button class="chip ${wordFilter === k ? 'on' : ''}" data-f="${k}">${t}</button>`).join('')}
     </div>
-    ${wordFilter === 'star' && starN ? `<div class="row" style="margin-bottom:12px"><a class="btn ghost" href="#/star/cards">🃏 生詞卡</a><a class="btn" href="#/star/quiz">✍️ 生詞測驗</a></div>` : ''}
+    ${wordFilter === 'star' && starN ? `<div class="row" style="margin-bottom:12px"><a class="btn ghost" href="#/star/cards">生詞卡</a><a class="btn" href="#/star/quiz">生詞測驗</a></div>` : ''}
     <div class="wl" id="wl"></div><div class="more" id="more"></div>`;
   const draw = () => {
     const q = lc(wordQuery.trim());
@@ -423,8 +426,8 @@ function viewWords() {
       (!q || w.k.includes(q) || w.uses.some(u => u.zh.includes(wordQuery.trim()))));
     $('#wl').innerHTML = list.length ? list.slice(0, wordLimit).map(w =>
       `<div class="card wl-item" data-k="${esc(w.k)}"><span class="en">${esc(w.en)}</span><span class="zh">${esc([...new Set(w.uses.map(u => u.zh))].join('；'))}</span>
-       ${S.known[w.k] ? '<span class="badge">✓</span>' : ''}<button class="star">${S.star[w.k] ? '★' : '☆'}</button></div>`).join('')
-      : `<div class="empty"><b>${wordFilter === 'star' ? '⭐' : '🔍'}</b>${wordFilter === 'star' ? '在故事裡點單詞，就能加入生詞本' : '沒有符合的單詞'}</div>`;
+       ${S.known[w.k] ? '<span class="badge">已掌握</span>' : ''}${starBtn(S.star[w.k])}</div>`).join('')
+      : `<div class="empty">${wordFilter === 'star' ? '在故事裡點單詞，就能加入生詞本' : '沒有符合的單詞'}</div>`;
     $('#more').innerHTML = list.length > wordLimit ? `<button class="btn ghost" id="mb">顯示更多（還有 ${list.length - wordLimit} 個）</button>` : '';
     if ($('#mb')) $('#mb').onclick = () => { wordLimit += 120; keepScroll(draw); };
     app.querySelectorAll('.wl-item').forEach(el => el.onclick = e => {
@@ -448,10 +451,10 @@ function viewMistakes() {
   const list = Object.entries(S.wrong).sort((a, b) => b[1].n - a[1].n || b[1].t - a[1].t);
   app.innerHTML = list.length ? `
     <div class="card" style="margin-bottom:14px"><b>${list.length}</b> 個單詞待加強<div class="small muted">在錯題測驗中答對就會扣次數，扣到 0 自動移出</div>
-      <div class="row" style="margin-top:12px"><a class="btn ghost" href="#/mistakes/cards">🃏 錯題卡</a><a class="btn" href="#/mistakes/quiz">✍️ 錯題測驗</a></div></div>
+      <div class="row" style="margin-top:12px"><a class="btn ghost" href="#/mistakes/cards">錯題卡</a><a class="btn" href="#/mistakes/quiz">錯題測驗</a></div></div>
     <div class="wl">${list.map(([k, w]) => `<div class="card wl-item" data-k="${esc(k)}"><span class="en">${esc(w.en)}</span><span class="zh">${esc(w.zh)}</span><span class="cnt">×${w.n}</span></div>`).join('')}</div>
     <div class="more"><button class="btn ghost" id="clr">清空錯題本</button></div>`
-    : '<div class="empty"><b>📝</b>還沒有錯題<br>去做幾個故事測驗吧！</div>';
+    : '<div class="empty">還沒有錯題<br>去做幾個故事測驗吧</div>';
   app.querySelectorAll('.wl-item').forEach(el => el.onclick = () => { const w = S.wrong[el.dataset.k]; openSheet(w.en, { sid: w.sid, zh: w.zh }); });
   if ($('#clr')) $('#clr').onclick = () => { if (confirm('確定清空錯題本？')) { S.wrong = {}; save(); viewMistakes(); } };
 }
@@ -474,7 +477,7 @@ function viewMe() {
     <div class="section-title">設定</div>
     <div class="card">
       <div class="kv"><span>深淺色</span><span class="chips">${[['', '跟隨系統'], ['light', '淺色'], ['dark', '深色']].map(([k, t]) => `<button class="chip ${S.theme === k ? 'on' : ''}" data-t="${k}">${t}</button>`).join('')}</span></div>
-      <div class="kv"><span>發音測試</span><button class="speak" data-say="Practice makes perfect">🔊</button></div>
+      <div class="kv"><span>發音測試</span><button class="speak" data-say="Practice makes perfect" aria-label="發音">${I.speak}</button></div>
       <div class="kv"><span>進度只存在這支手機的瀏覽器</span><span></span></div>
     </div>
     <div class="row" style="margin-top:14px"><button class="btn ghost" id="exp">匯出進度</button><button class="btn ghost" id="imp">匯入進度</button></div>
@@ -537,4 +540,4 @@ document.documentElement.style.setProperty('--font', S.font + 'px');
 fetch('data/stories.json')
   .then(r => r.json())
   .then(d => { prepare(d); addEventListener('hashchange', route); route(); })
-  .catch(() => { app.innerHTML = '<div class="empty"><b>⚠️</b>資料載入失敗，請重新整理</div>'; });
+  .catch(() => { app.innerHTML = '<div class="empty">資料載入失敗，請重新整理</div>'; });
